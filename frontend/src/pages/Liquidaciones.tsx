@@ -11,6 +11,7 @@ export default function Liquidaciones() {
   const [choferes, setChoferes] = useState<any[]>([]);
   const [error, setError] = useState("");
   const [detalle, setDetalle] = useState<any>(null);
+  const [descargando, setDescargando] = useState<string>("");
 
   const [form, setForm] = useState({
     tipo: "TRANSPORTISTA", transportistaId: "", choferId: "", periodoDesde: "", periodoHasta: "", comisionPct: "0",
@@ -83,6 +84,27 @@ export default function Liquidaciones() {
       verDetalle(id);
     } catch (err: any) {
       setError(err?.response?.data?.message || "No se pudo completar la acción");
+    }
+  }
+
+  async function descargar(id: string, numero: string | number, tipo: "excel" | "pdf") {
+    setError("");
+    setDescargando(`${id}-${tipo}`);
+    try {
+      const { data } = await api.get(`/liquidaciones/${id}/${tipo}`, { responseType: "blob" });
+      const ext = tipo === "excel" ? "xlsx" : "pdf";
+      const url = window.URL.createObjectURL(new Blob([data]));
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `liquidacion-${numero}.${ext}`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (err: any) {
+      setError("No se pudo descargar el archivo");
+    } finally {
+      setDescargando("");
     }
   }
 
@@ -207,7 +229,7 @@ export default function Liquidaciones() {
       {detalle && (
         <div className="card">
           <div className="page-header">
-            <h1>Liquidación N° {detalle.numero}</h1>
+            <h1>Liquidación N° {detalle.numerl}</h1>
             <span className={`badge ${detalle.estado}`}>{detalle.estado}</span>
           </div>
           <p>
@@ -241,6 +263,12 @@ export default function Liquidaciones() {
             </>
           )}
           <div className="actions-row">
+            <button className="btn secondary" disabled={descargando === `${detalle.id}-excel`} onClick={() => descargar(detalle.id, detalle.numero, "excel")}>
+              {descargando === `${detalle.id}-excel` ? "Descargando..." : "Descargar Excel"}
+            </button>
+            <button className="btn secondary" disabled={descargando === `${detalle.id}-pdf`} onClick={() => descargar(detalle.id, detalle.numero, "pdf")}>
+              {descargando === `${detalle.id}-pdf` ? "Descargando..." : "Descargar PDF"}
+            </button>
             {detalle.estado === "BORRADOR" && <button className="btn success" onClick={() => accion(detalle.id, "confirmar")}>Confirmar</button>}
             {detalle.estado === "CONFIRMADA" && <button className="btn success" onClick={() => accion(detalle.id, "pagar")}>Marcar como pagada</button>}
             {detalle.estado !== "PAGADA" && <button className="btn danger" onClick={() => accion(detalle.id, "anular")}>Anular</button>}
