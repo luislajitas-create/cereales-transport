@@ -3,7 +3,7 @@ import {
 } from "@nestjs/common";
 import { Response } from "express";
 import * as ExcelJS from "exceljs";
-import * as PDFDocument from "pdfkit";
+import PDFDocument = require("pdfkit");
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
 import { RolesGuard } from "../auth/roles.guard";
 import { Roles } from "../auth/roles.decorator";
@@ -197,7 +197,7 @@ function nombreContraparte(liquidacion: any) {
     "Content-Disposition": `attachment; filename="liquidacion-${liquidacion.numero}.pdf"`,
   });
 
-  const doc = new (PDFDocument as any)({ margin: 50 });
+  const doc = new PDFDocument({ margin: 50 });
     doc.pipe(res);
 
   doc.fontSize(18).text(`Liquidación N° ${liquidacion.numero}`, { align: "center" });
