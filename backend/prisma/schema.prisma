@@ -1,4 +1,4 @@
-﻿generator client {
+generator client {
   provider = "prisma-client-js"
 }
 
@@ -438,7 +438,7 @@ model AuditLog {
 }
 
 # ============================================================
-# FUEL MANAGEMENT MODULE (GESTIÃ“N DE COMBUSTIBLES)
+# FUEL MANAGEMENT MODULE (GESTIÓN DE COMBUSTIBLES)
 # ============================================================
 
 model EstacionServicio {
@@ -531,7 +531,7 @@ model MovimientoCuentaCorriente {
   tipoMovimiento        TipoMovimientoCuenta
   fecha                 DateTime
   monto                 Float
-  referencia            String?
+  referencia            String?                   # solicitudId, pagoId, etc
   observacion           String?
 
   cuentaCorriente       CuentaCorrienteEstacion  @relation(fields: [cuentaCorrienteId], references: [id], onDelete: Cascade)
@@ -565,7 +565,7 @@ model ReconciliacionCombustible {
   id                        String             @id @default(uuid())
   estacionId                String
   fecha                     DateTime
-  fuente                    String
+  fuente                    String             # MANUAL, AUTO_IMPORT, RECONCILIACION
   solicitudesMatches        Int                @default(0)
   solicitudesDiscrepancias  Int                @default(0)
   montoTotalSolicitado      Float              @default(0)
@@ -584,14 +584,14 @@ model ReconciliacionCombustible {
 model ImportacionCombustible {
   id                    String             @id @default(uuid())
   reconciliacionId      String
-  archivo               String
+  archivo               String             # URL to uploaded file
   archivoNombre         String
-  tipoArchivo           String
+  tipoArchivo           String             # EXCEL, PDF
   fechaImportacion      DateTime           @default(now())
   lineasProcesadas      Int                @default(0)
   lineasConError        Int                @default(0)
-  detallesError         String?
-  estado                String
+  detallesError         String?            # JSON array of errors
+  estado                String             # PENDIENTE, PROCESADO, CON_ERRORES
   procesadoEl           DateTime?
   createdAt             DateTime           @default(now())
 
@@ -620,4 +620,3 @@ model ConsumoCombustibleEstadistica {
   @@index([estacionId])
   @@index([mes, ano])
 }
-
