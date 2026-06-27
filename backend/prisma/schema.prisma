@@ -207,6 +207,8 @@ model Cereal {
   nombre String  @unique
   viajes Viaje[]
 }
+  viajes Viaje[]
+}
 
 model Ubicacion {
   id        String        @id @default(uuid())
@@ -227,8 +229,8 @@ model TipoGasto {
   movimientos LiquidacionMovimiento[]
 }
 
-model Viaje {
-  id                 String                 @id @default(uuid())
+model Viaje
+id                 String                 @id @default(uuid())
   numeroViaje        Int                    @default(autoincrement())
   fecha              DateTime
   cartaPorte         String
@@ -269,11 +271,8 @@ model Viaje {
   liquidacionViaje     LiquidacionViaje?
   facturaViaje         FacturaViaje?
   liquidacionMovimientos LiquidacionMovimiento[]
-  solicitudesCombustible   SolicitudCombustible[]
 
-  
-  solicitudesCombustible   SolicitudCombustible[]
-@@index([fecha])
+  @@index([fecha])
   @@index([clienteId])
   @@index([transportistaId])
   @@index([estado])
@@ -440,7 +439,7 @@ model AuditLog {
   @@index([entidad, entidadId])
 }
 
-/// FUEL MANAGEMENT MODULE (GESTIÃ“N DE COMBUSTIBLES)
+/// FUEL MANAGEMENT MODULE (GESTIÓN DE COMBUSTIBLES)
 
 model EstacionServicio {
   id                    String   @id @default(uuid())
@@ -619,6 +618,3 @@ model ConsumoCombustibleEstadistica {
 
   @@index([choferId])
   @@index([estacionId])
-  @@index([mes, ano])
-}
-
