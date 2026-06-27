@@ -1,4 +1,4 @@
-generator client {
+﻿generator client {
   provider = "prisma-client-js"
 }
 
@@ -270,7 +270,9 @@ model Viaje {
   facturaViaje         FacturaViaje?
   liquidacionMovimientos LiquidacionMovimiento[]
 
-  @@index([fecha])
+  
+  solicitudesCombustible   SolicitudCombustible[]
+@@index([fecha])
   @@index([clienteId])
   @@index([transportistaId])
   @@index([estado])
@@ -437,7 +439,7 @@ model AuditLog {
   @@index([entidad, entidadId])
 }
 
-/// FUEL MANAGEMENT MODULE (GESTIÓN DE COMBUSTIBLES)
+/// FUEL MANAGEMENT MODULE (GESTIÃ“N DE COMBUSTIBLES)
 
 model EstacionServicio {
   id                    String   @id @default(uuid())
@@ -618,3 +620,4 @@ model ConsumoCombustibleEstadistica {
   @@index([estacionId])
   @@index([mes, ano])
 }
+
