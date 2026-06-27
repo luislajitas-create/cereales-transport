@@ -7,6 +7,7 @@ import { AnticiposModule } from "./anticipos/anticipos.module";
 import { LiquidacionesModule } from "./liquidaciones/liquidaciones.module";
 import { FacturasModule } from "./facturas/facturas.module";
 import { DashboardModule } from "./dashboard/dashboard.module";
+import { CombustiblesModule } from "./combustibles/combustibles.module";
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { DashboardModule } from "./dashboard/dashboard.module";
     LiquidacionesModule,
     FacturasModule,
     DashboardModule,
+    CombustiblesModule,
   ],
 })
 export class AppModule {}
