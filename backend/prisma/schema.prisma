@@ -269,6 +269,7 @@ model Viaje {
   liquidacionViaje     LiquidacionViaje?
   facturaViaje         FacturaViaje?
   liquidacionMovimientos LiquidacionMovimiento[]
+  solicitudesCombustible   SolicitudCombustible[]
 
   
   solicitudesCombustible   SolicitudCombustible[]
