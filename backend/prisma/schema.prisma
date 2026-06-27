@@ -1,4 +1,4 @@
-generator client {
+﻿generator client {
   provider = "prisma-client-js"
 }
 
@@ -438,7 +438,7 @@ model AuditLog {
 }
 
 # ============================================================
-# FUEL MANAGEMENT MODULE (GESTIÓN DE COMBUSTIBLES)
+# FUEL MANAGEMENT MODULE (GESTIÃ“N DE COMBUSTIBLES)
 # ============================================================
 
 model EstacionServicio {
@@ -531,7 +531,7 @@ model MovimientoCuentaCorriente {
   tipoMovimiento        TipoMovimientoCuenta
   fecha                 DateTime
   monto                 Float
-  referencia            String?                   # solicitudId, pagoId, etc
+  referencia            String?
   observacion           String?
 
   cuentaCorriente       CuentaCorrienteEstacion  @relation(fields: [cuentaCorrienteId], references: [id], onDelete: Cascade)
@@ -565,7 +565,7 @@ model ReconciliacionCombustible {
   id                        String             @id @default(uuid())
   estacionId                String
   fecha                     DateTime
-  fuente                    String             # MANUAL, AUTO_IMPORT, RECONCILIACION
+  fuente                    String
   solicitudesMatches        Int                @default(0)
   solicitudesDiscrepancias  Int                @default(0)
   montoTotalSolicitado      Float              @default(0)
@@ -584,14 +584,14 @@ model ReconciliacionCombustible {
 model ImportacionCombustible {
   id                    String             @id @default(uuid())
   reconciliacionId      String
-  archivo               String             # URL to uploaded file
+  archivo               String
   archivoNombre         String
-  tipoArchivo           String             # EXCEL, PDF
+  tipoArchivo           String
   fechaImportacion      DateTime           @default(now())
   lineasProcesadas      Int                @default(0)
   lineasConError        Int                @default(0)
-  detallesError         String?            # JSON array of errors
-  estado                String             # PENDIENTE, PROCESADO, CON_ERRORES
+  detallesError         String?
+  estado                String
   procesadoEl           DateTime?
   createdAt             DateTime           @default(now())
 
@@ -620,3 +620,4 @@ model ConsumoCombustibleEstadistica {
   @@index([estacionId])
   @@index([mes, ano])
 }
+
