@@ -1,0 +1,237 @@
+From 34840d4969995a605e513251ecf40865a1c2a065 Mon Sep 17 00:00:00 2001
+From: Claude Assistant <claude@anthropic.com>
+Date: Sat, 27 Jun 2026 05:29:30 +0000
+Subject: [PATCH] Fix: Align Prisma schema with combustibles migration SQL -
+ resolve P1012 validation errors
+
+- Corrected EstacionServicio fields to match migration schema
+- Fixed SolicitudCombustible structure and relations
+- Updated LiquidacionCombustible to match migration (solicitudId-based)
+- Aligned ConsumoCombustibleEstadistica with migration fields
+- Removed incorrect transportista relations from combustibles models
+- Fixed Chofer and Liquidacion back-relations
+
+This resolves the build failure: 'Prisma schema validation - Error code: P1012'
+---
+ backend/prisma/schema.prisma | 155 +++++++++++++++--------------------
+ 1 file changed, 67 insertions(+), 88 deletions(-)
+
+diff --git a/backend/prisma/schema.prisma b/backend/prisma/schema.prisma
+index af368b7..da3b7dd 100644
+--- a/backend/prisma/schema.prisma
++++ b/backend/prisma/schema.prisma
+@@ -160,13 +160,11 @@ model Transportista {
+   activo      Boolean  @default(true)
+   createdAt   DateTime @default(now())
+ 
+-  choferes                 Chofer[]
+-  vehiculos                Vehiculo[]
+-  viajes                   Viaje[]
+-  liquidaciones            Liquidacion[]
+-  anticipos                AnticipoGasto[]
+-  solicitudesCombustible   SolicitudCombustible[]
+-  liquidacionesCombustible LiquidacionCombustible[]
++  choferes      Chofer[]
++  vehiculos     Vehiculo[]
++  viajes        Viaje[]
++  liquidaciones Liquidacion[]
++  anticipos     AnticipoGasto[]
+ }
+ 
+ model Chofer {
+@@ -185,7 +183,7 @@ model Chofer {
+   anticipos                AnticipoGasto[]
+   liquidaciones            Liquidacion[]
+   solicitudesCombustible   SolicitudCombustible[]
+-  liquidacionesCombustible LiquidacionCombustible[]
++  estadisticasCombustible  ConsumoCombustibleEstadistica[]
+ }
+ 
+ model Vehiculo {
+@@ -341,8 +339,9 @@ model Liquidacion {
+   chofer        Chofer?        @relation(fields: [choferId], references: [id])
+   creadoPor     Usuario?       @relation("LiquidacionCreadaPor", fields: [creadoPorId], references: [id])
+ 
+-  viajes      LiquidacionViaje[]
+-  movimientos LiquidacionMovimiento[]
++  viajes          LiquidacionViaje[]
++  movimientos     LiquidacionMovimiento[]
++  combustibles    LiquidacionCombustible[]
+ 
+   @@index([transportistaId])
+   @@index([choferId])
+@@ -443,96 +442,70 @@ model AuditLog {
+ # ============================================================
+ 
+ model EstacionServicio {
+-  id                String   @id @default(uuid())
+-  nombre            String
+-  localidad         String
+-  direccion         String?
+-  telefono          String?
+-  contacto          String?
+-  email             String?
+-  coordenadas       String?  # JSON: {"lat": -32.94, "lng": -60.74}
+-  activa            Boolean  @default(true)
+-  createdAt         DateTime @default(now())
+-  updatedAt         DateTime @updatedAt
++  id                    String   @id @default(uuid())
++  nombre                String
++  domicilio             String?
++  telefonoContacto      String?
++  contactoNombre        String?
++  numeroClientePYME     String?
++  activo                Boolean  @default(true)
++  createdAt             DateTime @default(now())
++  updatedAt             DateTime @updatedAt
+ 
+   solicitudes           SolicitudCombustible[]
+   cuentaCorriente       CuentaCorrienteEstacion?
+   pagos                 PagoEstacion[]
+   reconciliaciones      ReconciliacionCombustible[]
++  importaciones         ImportacionCombustible[]
++  estadisticas          ConsumoCombustibleEstadistica[]
+ 
+-  @@index([localidad])
+-  @@index([activa])
++  @@index([activo])
+ }
+ 
+ model SolicitudCombustible {
+   id                    String                       @id @default(uuid())
+-  numero                Int                          @default(autoincrement())
++  numero                Int                          @unique @default(autoincrement())
+   choferId              String
+-  transportistaId       String
+-  estacionId            String
+-  fecha                 DateTime
+-  cantidadSolicitada    Float                        # litros
+-  cantidadRecibida      Float?                       # litros (populated after reception)
+-  precioEstimado        Float                        # ARS
+-  precioFinal           Float?                       # ARS (actual price)
+-  estado                EstadoSolicitudCombustible  @default(BORRADOR)
+-  observaciones         String?
+-
+-  # Authorization fields
+-  autorizadoPorId       String?
++  viajeId               String?
++  estacionId            String?
++  cantidadSolicitada    Float
++  cantidadRecibida      Float?
++  estado                EstadoSolicitudCombustible   @default(BORRADOR)
++  fechaCreacion         DateTime                     @default(now())
++  fechaSolicitud        DateTime?
+   fechaAutorizacion     DateTime?
++  fechaEnvio            DateTime?
++  fechaRecepcion        DateTime?
++  fechaLiquidacion      DateTime?
++  observaciones         String?
++  motivoRechazo         String?
++  autorizadoPor         String?
++  createdAt             DateTime                     @default(now())
++  updatedAt             DateTime                     @updatedAt
+ 
+-  # Dispatch fields
+-  enviadoEl             DateTime?
+-  numeroDespacho        String?
+-
+-  # Reception fields
+-  recibidoEl            DateTime?
+-  comprobante           String?  # URL to gas station receipt
+-  discrepancia          Boolean  @default(false)
+-  motivoDiscrepancia    String?
+-
+-  # Reconciliation
+-  reconciliadoEl        DateTime?
+-  liquidacionId         String?
+-
+-  createdAt             DateTime @default(now())
+-  updatedAt             DateTime @updatedAt
+-
+-  chofer                Chofer                      @relation(fields: [choferId], references: [id])
+-  transportista         Transportista              @relation(fields: [transportistaId], references: [id])
+-  estacion              EstacionServicio           @relation(fields: [estacionId], references: [id])
+-  autorizadoPor         Usuario?                   @relation("SolicitudAutorizada", fields: [autorizadoPorId], references: [id])
+-  liquidacion           LiquidacionCombustible?    @relation(fields: [liquidacionId], references: [id])
++  chofer                Chofer                       @relation(fields: [choferId], references: [id], onDelete: Restrict)
++  viaje                 Viaje?                       @relation(fields: [viajeId], references: [id], onDelete: SetNull)
++  estacion              EstacionServicio?            @relation(fields: [estacionId], references: [id], onDelete: SetNull)
+ 
+-  @@unique([numero])
+-  @@index([choferId, fecha])
++  @@index([choferId])
++  @@index([viajeId])
+   @@index([estacionId])
+   @@index([estado])
+-  @@index([transportistaId])
++  @@index([fechaSolicitud])
+ }
+ 
+ model LiquidacionCombustible {
+   id                    String                    @id @default(uuid())
+-  numero                Int                       @default(autoincrement())
+-  choferId              String
+-  transportistaId       String
+-  liquidacionId         String?                   # Reference to Liquidacion model
+-  fecha                 DateTime
+-  cantidadLitros        Float
+-  costoPorLitro         Float
+-  costoTotal            Float
++  solicitudId           String                    @unique
++  liquidacionId         String?
++  importeLiquidado      Float
++  fechaLiquidacion      DateTime                  @default(now())
+   observaciones         String?
+-  createdAt             DateTime @default(now())
+-  updatedAt             DateTime @updatedAt
+-
+-  chofer                Chofer                    @relation(fields: [choferId], references: [id])
+-  transportista         Transportista             @relation(fields: [transportistaId], references: [id])
++  createdAt             DateTime                  @default(now())
+ 
+-  solicitudes           SolicitudCombustible[]
++  solicitud             SolicitudCombustible      @relation(fields: [solicitudId], references: [id], onDelete: Restrict)
++  liquidacion           Liquidacion?              @relation(fields: [liquidacionId], references: [id], onDelete: SetNull)
+ 
+-  @@unique([numero])
+-  @@index([choferId, fecha])
+   @@index([liquidacionId])
+ }
+ 
+@@ -627,16 +600,22 @@ model ImportacionCombustible {
+ }
+ 
+ model ConsumoCombustibleEstadistica {
+-  id                    String             @id @default(uuid())
+-  choferId              String?
+-  transportistaId       String?
+-  periodo               String             # YYYYMM
+-  cantidadLitros        Float
+-  costoTotal            Float              # ARS
+-  costoPorLitro         Float?
+-  createdAt             DateTime           @default(now())
++  id                       String             @id @default(uuid())
++  choferId                 String?
++  estacionId               String?
++  mes                      Int
++  ano                      Int
++  cantidadTotal            Float              @default(0)
++  importeTotal             Float              @default(0)
++  numeroTransacciones      Int                @default(0)
++  promedioPorTransaccion   Float?
++  createdAt                DateTime           @default(now())
++  updatedAt                DateTime           @updatedAt
++
++  chofer                   Chofer?            @relation(fields: [choferId], references: [id], onDelete: SetNull)
++  estacion                 EstacionServicio?  @relation(fields: [estacionId], references: [id], onDelete: SetNull)
+ 
+-  @@unique([choferId, periodo])
+-  @@unique([transportistaId, periodo])
+-  @@index([periodo])
++  @@index([choferId])
++  @@index([estacionId])
++  @@index([mes, ano])
+ }
+-- 
+2.43.0
+
