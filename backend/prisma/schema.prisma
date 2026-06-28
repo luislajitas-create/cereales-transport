@@ -118,9 +118,7 @@ model Usuario {
   historialCambios        HistorialEstadoViaje[]           @relation("HistorialCambios")
   anticiposRegistrados    AnticipoGasto[]                  @relation("UsuarioAnticipos")
   liquidacionesCreadas    Liquidacion[]                    @relation("LiquidacionCreadaPor")
-  auditLogs               AuditLog[]                       @relation("UsuarioAuditLogs")
-  solicitudesAutorizadas  SolicitudCombustible[]           @relation("SolicitudAutorizada")
-}
+ }
 
 model Cliente {
   id                     String   @id @default(uuid())
