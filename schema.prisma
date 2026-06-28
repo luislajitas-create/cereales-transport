@@ -398,3 +398,23 @@ model AuditLog {
 
   @@index([entidad, entidadId])
 }
+model ConsumoCombustibleEstadistica {
+  id                       String             @id @default(uuid())
+  choferId                 String?
+  estacionId               String?
+  mes                      Int
+  ano                      Int
+  cantidadTotal            Float              @default(0)
+  importeTotal             Float              @default(0)
+  numeroTransacciones      Int                @default(0)
+  promedioPorTransaccion   Float?
+  createdAt                DateTime           @default(now())
+  updatedAt                DateTime           @updatedAt
+
+  chofer                   Chofer?            @relation(fields: [choferId], references: [id], onDelete: SetNull)
+  estacion                 EstacionServicio?  @relation(fields: [estacionId], references: [id], onDelete: SetNull)
+
+  @@index([choferId])
+  @@index([estacionId])
+  @@index([mes, ano])
+}
