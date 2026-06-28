@@ -26,85 +26,6 @@ enum EstadoViajeEnum {
   CANCELADO
 }
 
-enum EstadoFacturacionEnum {
-  PENDIENTE_DE_FACTURAR
-  FACTURADO
-  COBRADO_PARCIAL
-  COBRADO_TOTAL
-  ANULADO
-}
-
-enum EstadoLiquidacionItemEnum {
-  PENDIENTE
-  LIQUIDADO
-  PAGADO
-}
-
-enum TipoVehiculo {
-  CAMION
-  ACOPLADO
-}
-
-enum TipoUbicacion {
-  ACOPIO
-  PLANTA
-  PUERTO
-  CAMPO
-  OTRO
-}
-
-enum TipoLiquidacion {
-  TRANSPORTISTA
-  CHOFER
-}
-
-enum EstadoLiquidacionEnum {
-  BORRADOR
-  CONFIRMADA
-  PAGADA
-  ANULADA
-}
-
-enum EstadoFacturaEnum {
-  FACTURADO
-  COBRADO_PARCIAL
-  COBRADO_TOTAL
-  ANULADO
-}
-
-enum EstadoSolicitudCombustible {
-  BORRADOR
-  SOLICITADO
-  AUTORIZADO
-  RECHAZADO
-  MODIFICADO
-  ENVIADO
-  RECIBIDO
-  LIQUIDADO
-  CANCELADO
-}
-
-enum EstadoCuentaCorriente {
-  ACTIVA
-  SALDADA
-  SUSPENDIDA
-}
-
-enum TipoMetodoPago {
-  TRANSFERENCIA
-  CHEQUE
-  EFECTIVO
-  TARJETA_CREDITO
-  OTRO
-}
-
-enum TipoMovimientoCuenta {
-  COMPRA
-  PAGO
-  AJUSTE
-  DEVOLUCION
-}
-
 model Usuario {
   id           String    @id @default(uuid())
   nombre       String
@@ -114,11 +35,8 @@ model Usuario {
   activo       Boolean   @default(true)
   createdAt    DateTime  @default(now())
 
-  viajesCreados           Viaje[]                          @relation("ViajeCreadoPor")
-  historialCambios        HistorialEstadoViaje[]           @relation("HistorialCambios")
-  anticiposRegistrados    AnticipoGasto[]                  @relation("UsuarioAnticipos")
-  liquidacionesCreadas    Liquidacion[]                    @relation("LiquidacionCreadaPor")
- }
+  viajesCreados Viaje[] @relation("ViajeCreadoPor")
+}
 
 model Cliente {
   id                     String   @id @default(uuid())
@@ -128,219 +46,20 @@ model Cliente {
   activo                 Boolean  @default(true)
   createdAt              DateTime @default(now())
 
-  contactos Contacto[]  @relation("ClienteContactos")
-  viajes    Viaje[]     @relation("ClienteViajes")
-  facturas  Factura[]   @relation("ClienteFacturas")
-}
-
-model Contacto {
-  id        String  @id @default(uuid())
-  clienteId String
-  nombre    String
-  telefono  String?
-  email     String?
-  cliente   Cliente @relation("ClienteContactos", fields: [clienteId], references: [id], onDelete: Cascade)
-}
-
-model Productor {
-  id        String  @id @default(uuid())
-  nombre    String
-  cuit      String?
-  localidad String?
-  viajes    Viaje[] @relation("ProductorViajes")
-}
-
-model Transportista {
-  id          String   @id @default(uuid())
-  razonSocial String
-  cuit        String   @unique
-  domicilio   String?
-  activo      Boolean  @default(true)
-  createdAt   DateTime @default(now())
-
-  choferes      Chofer[]         @relation("TransportistaChoferes")
-  vehiculos     Vehiculo[]       @relation("TransportistaVehiculos")
-  viajes        Viaje[]          @relation("TransportistaViajes")
-  liquidaciones Liquidacion[]    @relation("TransportistaLiquidaciones")
-  anticipos     AnticipoGasto[]  @relation("TransportistaAnticipos")
-}
-
-model Chofer {
-  id                  String   @id @default(uuid())
-  transportistaId     String
-  nombre              String
-  dni                 String?
-  cuil                String   @unique
-  comisionPct         Float    @default(0)
-  licenciaNumero      String?
-  licenciaVencimiento DateTime?
-  telefono            String?
-
-  transportista            Transportista                   @relation("TransportistaChoferes", fields: [transportistaId], references: [id])
-  viajes                   Viaje[]                         @relation("ChoferViajes")
-  anticipos                AnticipoGasto[]                 @relation("ChoferAnticipos")
-  liquidaciones            Liquidacion[]                   @relation("ChoferLiquidaciones")
-  solicitudesCombustible   SolicitudCombustible[]          @relation("ChoferSolicitudes")
-  estadisticasCombustible  ConsumoCombustibleEstadistica[] @relation("ChoferEstadisticas")
-}
-
-model Vehiculo {
-  id                 String       @id @default(uuid())
-  transportistaId    String
-  patente            String       @unique
-  marca              String?
-  modelo             String?
-  tipo               TipoVehiculo
-  capacidadKg        Float?
-  vencimientoRto     DateTime?
-  vencimientoSeguro  DateTime?
-
-  transportista     Transportista @relation("TransportistaVehiculos", fields: [transportistaId], references: [id])
-  viajesComoCamion  Viaje[]       @relation("ViajeCamion")
-  viajesComoAcoplado Viaje[]      @relation("ViajeAcoplado")
-}
-
-model Cereal {
-  id     String  @id @default(uuid())
-  nombre String  @unique
-  viajes Viaje[] @relation("CerealViajes")
-}
-
-model Ubicacion {
-  id        String        @id @default(uuid())
-  nombre    String
-  tipo      TipoUbicacion
-  localidad String?
-
-  viajesOrigen  Viaje[] @relation("ViajeOrigen")
-  viajesDestino Viaje[] @relation("ViajeDestino")
-}
-
-model TipoGasto {
-  id                String  @id @default(uuid())
-  nombre            String  @unique
-  afectaLiquidacion Boolean @default(true)
-
-  anticipos  AnticipoGasto[]        @relation("TipoGastoAnticipos")
-  movimientos LiquidacionMovimiento[] @relation("TipoGastoMovimientos")
+  viajes Viaje[] @relation("ClienteViajes")
 }
 
 model Viaje {
-  id                 String                 @id @default(uuid())
-  numeroViaje        Int                    @default(autoincrement())
-  fecha              DateTime
-  cartaPorte         String
-  ctg                String                 @unique
-  cerealId           String
-  clienteId          String
-  productorId        String?
-  transportistaId    String
-  choferId           String
-  camionId           String
-  acopladoId         String?
-  origenId           String
-  destinoId          String
-  toneladas          Float
-  tarifaTonelada     Float
-  importeTotal       Float
-  estado             EstadoViajeEnum        @default(PENDIENTE)
-  estadoFacturacion  EstadoFacturacionEnum  @default(PENDIENTE_DE_FACTURAR)
-  estadoLiquidacion  EstadoLiquidacionItemEnum @default(PENDIENTE)
-  observaciones      String?
-  creadoPorId        String?
-  createdAt          DateTime               @default(now())
-  updatedAt          DateTime               @updatedAt
+  id           String   @id @default(uuid())
+  numero       String   @unique
+  estado       EstadoViajeEnum @default(PENDIENTE)
 
-  cereal         Cereal         @relation("CerealViajes", fields: [cerealId], references: [id])
-  cliente        Cliente        @relation("ClienteViajes", fields: [clienteId], references: [id])
-  productor      Productor?     @relation("ProductorViajes", fields: [productorId], references: [id])
-  transportista  Transportista  @relation("TransportistaViajes", fields: [transportistaId], references: [id])
-  chofer         Chofer         @relation("ChoferViajes", fields: [choferId], references: [id])
-  camion         Vehiculo       @relation("ViajeCamion", fields: [camionId], references: [id])
-  acoplado       Vehiculo?      @relation("ViajeAcoplado", fields: [acopladoId], references: [id])
-  origen         Ubicacion      @relation("ViajeOrigen", fields: [origenId], references: [id])
-  destino        Ubicacion      @relation("ViajeDestino", fields: [destinoId], references: [id])
-  creadoPor      Usuario?       @relation("ViajeCreadoPor", fields: [creadoPorId], references: [id])
+  creadoPorId  String
+  creadoPor    Usuario  @relation("ViajeCreadoPor", fields: [creadoPorId], references: [id])
 
-  historial          HistorialEstadoViaje[]     @relation("ViajeHistorial")
-  anticipos           AnticipoGasto[]            @relation("ViajeAnticipos")
-  liquidacionViaje     LiquidacionViaje?         @relation("ViajeFacturacion")
-  facturaViaje         FacturaViaje?             @relation("ViajeFacturaFacturacion")
-  liquidacionMovimientos LiquidacionMovimiento[] @relation("ViajeLiquidacionMovimientos")
+  clienteId    String
+  cliente      Cliente  @relation("ClienteViajes", fields: [clienteId], references: [id])
 
-  @@index([fecha])
-  @@index([clienteId])
-  @@index([transportistaId])
-  @@index([estado])
-}
-
-model HistorialEstadoViaje {
-  id             String   @id @default(uuid())
-  viajeId        String
-  estadoAnterior String?
-  estadoNuevo    String
-  usuarioId      String?
-  fecha          DateTime @default(now())
-
-  viaje   Viaje    @relation("ViajeHistorial", fields: [viajeId], references: [id], onDelete: Cascade)
-  usuario Usuario? @relation("HistorialCambios", fields: [usuarioId], references: [id])
-
-  @@index([viajeId])
-}
-
-model AnticipoGasto {
-  id              String    @id @default(uuid())
-  viajeId         String?
-  choferId        String
-  transportistaId String
-  tipoGastoId     String
-  fecha           DateTime
-  importe         Float
-  observaciones   String?
-  usuarioId       String?
-  comprobanteUrl  String?
-  anulado         Boolean   @default(false)
-  anuladoMotivo   String?
-  liquidado       Boolean   @default(false)
-  createdAt       DateTime  @default(now())
-
-  viaje         Viaje?        @relation("ViajeAnticipos", fields: [viajeId], references: [id])
-  chofer        Chofer        @relation("ChoferAnticipos", fields: [choferId], references: [id])
-  transportista Transportista @relation("TransportistaAnticipos", fields: [transportistaId], references: [id])
-  tipoGasto     TipoGasto     @relation("TipoGastoAnticipos", fields: [tipoGastoId], references: [id])
-  usuario       Usuario?      @relation("UsuarioAnticipos", fields: [usuarioId], references: [id])
-
-  @@index([choferId, fecha])
-  @@index([transportistaId, fecha])
-}
-
-model Liquidacion {
-  id              String                @id @default(uuid())
-  numero          Int                   @default(autoincrement())
-  tipo            TipoLiquidacion
-  transportistaId String?
-  choferId        String?
-  periodoDesde    DateTime
-  periodoHasta    DateTime
-  estado          EstadoLiquidacionEnum @default(BORRADOR)
-  comisionPct     Float                 @default(0)
-  totalBruto      Float                 @default(0)
-  totalAnticipos  Float                 @default(0)
-  totalDescuentos Float                 @default(0)
-  netoPagar       Float                 @default(0)
-  fechaPago       DateTime?
-  creadoPorId     String?
-  createdAt       DateTime              @default(now())
-  updatedAt       DateTime              @updatedAt
-
-  transportista Transportista? @relation("TransportistaLiquidaciones", fields: [transportistaId], references: [id])
-  chofer        Chofer?        @relation("ChoferLiquidaciones", fields: [choferId], references: [id])
-  creadoPor     Usuario?       @relation("LiquidacionCreadaPor", fields: [creadoPorId], references: [id])
-
-  viajes          LiquidacionViaje[]       @relation("LiquidacionViajes")
-  movimientos     LiquidacionMovimiento[]  @relation("LiquidacionMovimientos")
-  combustibles    LiquidacionCombustible[] @relation("LiquidacionCombustibles")
-
-  @@index([transportistaId])
-  @@index([choferId])
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 }
