@@ -1,8 +1,26 @@
+@"
 {
-  "$schema": "https://json.schemastore.org/nest-cli",
-  "collection": "@nestjs/schematics",
-  "sourceRoot": "src",
-  "compilerOptions": {
-    "deleteOutDir": true
-  }
+  `"collection`": `"@nestjs/schematics`",
+  `"sourceRoot`": `"src`",
+  `"compilerOptions`": {
+    `"webpack`": true,
+    `"plugins`": [
+      {
+        `"name`": `"@nestjs/swagger`",
+        `"options`": {
+          `"classValidatorShim`": false
+        }
+      }
+    ]
+  },
+  `"monorepo`": false,
+  `"root`": `".`",
+  `"exclude`": [
+    `"src/_*.disabled/**`"
+  ]
 }
+"@ | Set-Content nest-cli.json
+
+git add nest-cli.json
+git commit -m "Add nest-cli.json to exclude disabled modules from NestJS build"
+git push -u origin main
