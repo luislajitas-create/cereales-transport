@@ -3,18 +3,7 @@ import { AppController } from "./app.controller";
 import { PrismaModule } from "./prisma/prisma.module";
 
 @Module({
-  imports: [
-    PrismaModule,
-    // Módulos desactivados temporalmente - requieren esquema completo
-    // AuthModule,
-    // CatalogosModule,
-    // ViajesModule,
-    // AnticiposModule,
-    // LiquidacionesModule,
-    // FacturasModule,
-    // DashboardModule,
-    // CombustiblesModule,
-  ],
+  imports: [PrismaModule],
   controllers: [AppController],
 })
 export class AppModule {}
