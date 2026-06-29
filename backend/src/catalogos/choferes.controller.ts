@@ -1,4 +1,62 @@
-import { Body, Controller, Get, Param, Patch, Post, Query, Res, UseGuards } from "@nestjs/common";
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Query,
+  Res,
+  UseGuards,
+} from "@nestjs/common";
+import { Response } from "express";
+import * as ExcelJS from "exceljs";
+import { JwtAuthGuard } from "../auth/jwt-auth.guard";
+import { PrismaService } from "../prisma/prisma.service";
+
+@UseGuards(JwtAuthGuard)
+@Controller("choferes")
+export class ChoferesController {
+  constructor(private prisma: PrismaService) {}
+
+  // TODO: Agregar el modelo chofer al schema.prisma para habilitar estas funciones
+  // Las siguientes funciones están comentadas porque el modelo chofer no está definido en Prisma
+
+  /*
+  @Get()
+  async findAll(@Query("transportistaId") transportistaId?: string) {
+    const where: any = {};
+    if (transportistaId) {
+      where.transportistaId = transportistaId;
+    }
+    return this.prisma.chofer.findMany({
+      where,
+    });
+  }
+
+  @Get(":id")
+  async findOne(@Param("id") id: string) {
+    return this.prisma.chofer.findUnique({
+      where: { id },
+    });
+  }
+
+  @Post()
+  async create(@Body() data: any) {
+    return this.prisma.chofer.create({
+      data,
+    });
+  }
+
+  @Patch(":id")
+  async update(@Param("id") id: string, @Body() data: any) {
+    return this.prisma.chofer.update({
+      where: { id },
+      data,
+    });
+  }
+  */
+}import { Body, Controller, Get, Param, Patch, Post, Query, Res, UseGuards } from "@nestjs/common";
 import { Response } from "express";
 import * as ExcelJS from "exceljs";
 import PDFDocument = require("pdfkit");
