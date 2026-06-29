@@ -10,7 +10,7 @@ export class AppController {
   @Get()
   root() {
     return {
-      title: "🌾 Sistema Dador de Carga de Cereales",
+      title: "🌾 FIXED - Sistema Dador de Carga de Cereales v2",
       description: "Plataforma integral de gestión de transporte y comercialización de cereales",
       status: "online",
       version: "1.0",
