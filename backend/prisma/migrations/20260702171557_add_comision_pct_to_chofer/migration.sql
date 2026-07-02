@@ -1,0 +1,2 @@
+-- AlterTable
+ALTER TABLE "Chofer" ADD COLUMN     "comisionPct" DOUBLE PRECISION NOT NULL DEFAULT 0;
