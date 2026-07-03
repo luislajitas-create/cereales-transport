@@ -1,6 +1,18 @@
 # Estado del proyecto — Sistema Dador de Carga de Cereales
 
-Última actualización: 2026-07-02 (post-commit `a2d4ca7`, pusheado a `origin/main`).
+Última actualización: 2026-07-03 (deploy a Railway validado de punta a punta).
+
+## Estado del deploy en Railway (2026-07-03)
+
+- **Backend**: Online en Railway. URL: `https://cereales-transport-production.up.railway.app`. `GET /api/v1/health` responde `200`.
+- **Migraciones**: reconciliadas y aplicadas contra la base de Railway (`20260702165247_init` + `20260702171557_add_comision_pct_to_chofer`), vía `prisma migrate resolve --applied` seguido de `prisma migrate deploy`.
+- **OpenSSL/Prisma**: resuelto — `binaryTargets` fijado en `schema.prisma` (`["native", "linux-musl-openssl-3.0.x"]`) y `openssl` instalado en ambas etapas del `Dockerfile` (commit `f7c2787`). El backend ya no crashea al iniciar.
+- **Frontend**: Online en Railway (servicio `perceptive-tranquility`). Responde `200`.
+- **`VITE_API_URL`**: actualizado a `https://cereales-transport-production.up.railway.app/api/v1` (antes apuntaba a un dominio roto de un repo abandonado). Confirmado horneado en el bundle JS compilado.
+- **CORS**: validado correctamente — preflight y request real desde el origen del frontend responden con los headers `access-control-allow-origin` esperados, sin bloqueos.
+- **Login**: la llamada llega correctamente al backend; responde `401` esperado porque **no existe ningún usuario demo en la base de Railway** (esa base tiene datos antiguos del 2026-06-26, de otro origen, sin relación con `prisma/seed.js`).
+- **Pendiente**: crear o cargar usuarios válidos en producción (seed controlado, no el `seed.js` de desarrollo tal cual).
+- **Pendiente**: decidir si se conserva la data vieja de la base de Railway (2 clientes, 3 usuarios, 5 viajes, etc., del 2026-06-26) o se normaliza/limpia antes de considerar el ambiente listo para datos reales.
 
 ## Arquitectura actual
 
@@ -91,6 +103,10 @@ Es decir, en tiempo de ejecución la única funcionalidad activa es `AppControll
    - **Estado**: Corregido el 2026-07-03. Fix aplicado en `LiquidacionesController.anular()`: si la liquidación no tiene movimientos, no se ejecuta `updateMany` sobre `AnticipoGasto`.
    - **Prioridad**: Alta — debe resolverse antes de exponer este módulo con datos reales, ya que corrompe silenciosamente el estado de liquidación de anticipos ajenos a la operación realizada.
    - **Deuda estructural pendiente (no resuelta por este fix)**: la relación entre `LiquidacionMovimiento` y `AnticipoGasto` debería ser por `anticipoGastoId`, no por `viajeId`. Hoy `LiquidacionMovimiento` no guarda el id del anticipo original, así que `anular()` solo puede reconstruir la relación de forma indirecta vía `viajeId` — impreciso si un mismo viaje tiene más de un anticipo asociado (revertiría todos, no solo el de esta liquidación). Requiere agregar el campo `anticipoGastoId` a `LiquidacionMovimiento` y una migración; queda pendiente para una próxima iteración.
+
+## Mejoras planificadas — próxima versión del backend
+
+- **`anticipoGastoId` en `LiquidacionMovimiento`** (diagnóstico completo hecho el 2026-07-03, plan aprobado conceptualmente, **implementación diferida a propósito**): hoy `LiquidacionMovimiento` vincula con `AnticipoGasto` de forma indirecta vía `viajeId`, lo cual es impreciso cuando un viaje tiene más de un anticipo asociado o cuando el anticipo no tiene viaje (`viajeId: null`). El fix de 2026-07-03 (commit `acd156c`) ya cerró el caso más grave (liquidación anulada sin movimientos afectando anticipos ajenos), pero la causa estructural sigue sin resolverse. Se decidió **no implementarlo en esta etapa**: requiere modificar `schema.prisma` (columna nueva + migración) y reescribir `LiquidacionesController.anular()`, y el proyecto priorizó primero una revisión arquitectónica completa antes de volver a tocar el schema. Ver el diagnóstico detallado (modelo actual, impacto, riesgos y plan de implementación paso a paso) conservado en el historial de esta sesión — no se transcribe acá para no duplicar contenido.
 
 ## Próximos pasos recomendados
 
