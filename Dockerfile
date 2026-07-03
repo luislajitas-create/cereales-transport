@@ -1,6 +1,9 @@
 # Stage 1: Build
 FROM node:20-alpine AS build
 
+# Install OpenSSL so Prisma can correctly detect it when generating the client
+RUN apk add --no-cache openssl
+
 WORKDIR /app/backend
 
 # Copy package files
@@ -24,6 +27,9 @@ RUN npm run build
 
 # Stage 2: Runtime
 FROM node:20-alpine
+
+# Install OpenSSL so the Prisma engine can load its shared libraries at runtime
+RUN apk add --no-cache openssl
 
 WORKDIR /app
 
