@@ -10,8 +10,10 @@
 - **Frontend**: Online en Railway (servicio `perceptive-tranquility`). Responde `200`.
 - **`VITE_API_URL`**: actualizado a `https://cereales-transport-production.up.railway.app/api/v1` (antes apuntaba a un dominio roto de un repo abandonado). Confirmado horneado en el bundle JS compilado.
 - **CORS**: validado correctamente — preflight y request real desde el origen del frontend responden con los headers `access-control-allow-origin` esperados, sin bloqueos.
-- **Login**: la llamada llega correctamente al backend; responde `401` esperado porque **no existe ningún usuario demo en la base de Railway** (esa base tiene datos antiguos del 2026-06-26, de otro origen, sin relación con `prisma/seed.js`).
-- **Pendiente**: crear o cargar usuarios válidos en producción (seed controlado, no el `seed.js` de desarrollo tal cual).
+- **Login**: la llamada llega correctamente al backend. Con los usuarios preexistentes de la base (datos antiguos del 2026-06-26, de otro origen, sin relación con `prisma/seed.js`) respondía `401` esperado por no conocer sus credenciales; con el usuario administrador creado para validación (ver abajo), el login funciona correctamente.
+- **Usuario administrador de producción**: se creó un usuario administrador de producción para validación del ambiente (no se documentan aquí email, contraseña ni hash).
+- **Login, JWT y endpoints protegidos**: verificados correctamente de punta a punta con ese usuario — login exitoso, emisión de JWT, y acceso autorizado a un endpoint protegido (`GET /api/v1/dashboard/resumen`).
+- **Backend validado de punta a punta**: Frontend → Backend → PostgreSQL, confirmado funcionando en conjunto.
 - **Pendiente**: decidir si se conserva la data vieja de la base de Railway (2 clientes, 3 usuarios, 5 viajes, etc., del 2026-06-26) o se normaliza/limpia antes de considerar el ambiente listo para datos reales.
 
 ## Arquitectura actual
