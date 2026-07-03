@@ -465,13 +465,15 @@ export class LiquidacionesController {
         await tx.viaje.update({ where: { id: lv.viajeId }, data: { estadoLiquidacion: "PENDIENTE" } });
       }
       const anticipoViajeIds = liquidacion.movimientos.map((m) => m.viajeId).filter(Boolean);
-      await tx.anticipoGasto.updateMany({
-        where: {
-          liquidado: true,
-          ...(anticipoViajeIds.length ? { viajeId: { in: anticipoViajeIds as string[] } } : {}),
-        },
-        data: { liquidado: false },
-      });
+      if (anticipoViajeIds.length > 0) {
+        await tx.anticipoGasto.updateMany({
+          where: {
+            liquidado: true,
+            viajeId: { in: anticipoViajeIds as string[] },
+          },
+          data: { liquidado: false },
+        });
+      }
     });
     return this.findOne(id);
   }
