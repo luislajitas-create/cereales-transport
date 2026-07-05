@@ -6,6 +6,10 @@ import { RolesGuard } from "../auth/roles.guard";
 import { Roles } from "../auth/roles.decorator";
 import { CurrentUser } from "../auth/current-user.decorator";
 import { PrismaService } from "../prisma/prisma.service";
+import { CreateViajeDto } from "./dto/create-viaje.dto";
+import { UpdateViajeDto } from "./dto/update-viaje.dto";
+import { CambiarEstadoDto } from "./dto/cambiar-estado.dto";
+import { CancelarViajeDto } from "./dto/cancelar-viaje.dto";
 
 const ORDEN_ESTADOS = ["PENDIENTE", "ASIGNADO", "EN_CARGA", "CARGADO", "EN_TRANSITO", "DESCARGADO"];
 
@@ -73,7 +77,7 @@ export class ViajesController {
 
   @Roles("OPERACIONES", "ADMINISTRADOR")
   @Post()
-  async create(@Body() body: any, @CurrentUser() user: any) {
+  async create(@Body() body: CreateViajeDto, @CurrentUser() user: any) {
     const importeTotal = Number(body.toneladas) * Number(body.tarifaTonelada);
     const viaje = await this.prisma.viaje.create({
       data: {
@@ -105,7 +109,7 @@ export class ViajesController {
 
   @Roles("OPERACIONES", "ADMINISTRADOR")
   @Patch(":id")
-  async update(@Param("id") id: string, @Body() body: any) {
+  async update(@Param("id") id: string, @Body() body: UpdateViajeDto) {
     const data: any = { ...body };
     delete data.estado;
     if (data.toneladas || data.tarifaTonelada) {
@@ -122,7 +126,7 @@ export class ViajesController {
 
   @Roles("OPERACIONES", "ADMINISTRADOR")
   @Post(":id/estado")
-  async cambiarEstado(@Param("id") id: string, @Body() body: { estado: string }, @CurrentUser() user: any) {
+  async cambiarEstado(@Param("id") id: string, @Body() body: CambiarEstadoDto, @CurrentUser() user: any) {
     const viaje = await this.prisma.viaje.findUnique({ where: { id } });
     if (!viaje) throw new NotFoundException("Viaje no encontrado");
     if (viaje.estado === "CANCELADO") throw new BadRequestException("El viaje está cancelado");
@@ -144,7 +148,7 @@ export class ViajesController {
 
   @Roles("OPERACIONES", "ADMINISTRADOR")
   @Post(":id/cancelar")
-  async cancelar(@Param("id") id: string, @Body() body: { motivo: string }, @CurrentUser() user: any) {
+  async cancelar(@Param("id") id: string, @Body() body: CancelarViajeDto, @CurrentUser() user: any) {
     const viaje = await this.prisma.viaje.findUnique({ where: { id } });
     if (!viaje) throw new NotFoundException("Viaje no encontrado");
     return this.aplicarCambioEstado(viaje, "CANCELADO", user, body.motivo);
