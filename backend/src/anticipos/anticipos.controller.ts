@@ -198,6 +198,7 @@ export class AnticiposController {
     return anticipo;
   }
 
+  @Roles("LIQUIDACIONES", "OPERACIONES", "ADMINISTRADOR")
   @Post()
   async create(@Body() body: any, @CurrentUser() user: any) {
     if (!body.choferId || !body.transportistaId || !body.tipoGastoId) {
@@ -219,6 +220,7 @@ export class AnticiposController {
     });
   }
 
+  @Roles("LIQUIDACIONES", "OPERACIONES", "ADMINISTRADOR")
   @Patch(":id")
   async update(@Param("id") id: string, @Body() body: any) {
     const actual = await this.prisma.anticipoGasto.findUnique({ where: { id } });
