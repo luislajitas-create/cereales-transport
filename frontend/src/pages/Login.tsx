@@ -5,7 +5,7 @@ import { useAuth } from "../context/AuthContext";
 export default function Login() {
   const { login } = useAuth();
   const navigate = useNavigate();
-  const [email, setEmail] = useState("admin@demo.com");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -40,10 +40,6 @@ export default function Login() {
         <button type="submit" disabled={loading}>
           {loading ? "Ingresando..." : "Ingresar"}
         </button>
-        <div className="login-hint">
-          Demo: admin@demo.com / gerencia@demo.com / operaciones@demo.com / liquidaciones@demo.com /
-          facturacion@demo.com — contraseña: Demo1234!
-        </div>
       </form>
     </div>
   );
