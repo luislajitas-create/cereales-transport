@@ -9,6 +9,8 @@ import { RolesGuard } from "../auth/roles.guard";
 import { Roles } from "../auth/roles.decorator";
 import { CurrentUser } from "../auth/current-user.decorator";
 import { PrismaService } from "../prisma/prisma.service";
+import { CreateLiquidacionDto } from "./dto/create-liquidacion.dto";
+import { PagarLiquidacionDto } from "./dto/pagar-liquidacion.dto";
 
 const includeLiquidacion = {
   transportista: true,
@@ -309,7 +311,7 @@ export class LiquidacionesController {
 
   @Roles("LIQUIDACIONES", "ADMINISTRADOR")
   @Post()
-  async create(@Body() body: any, @CurrentUser() user: any) {
+  async create(@Body() body: CreateLiquidacionDto, @CurrentUser() user: any) {
     const { tipo, transportistaId, choferId, periodoDesde, periodoHasta, comisionPct, viajeIds, anticipoIds } = body;
     if (!tipo || !["TRANSPORTISTA", "CHOFER"].includes(tipo)) {
       throw new BadRequestException("tipo debe ser TRANSPORTISTA o CHOFER");
@@ -430,7 +432,7 @@ export class LiquidacionesController {
 
   @Roles("LIQUIDACIONES", "ADMINISTRADOR")
   @Post(":id/pagar")
-  async pagar(@Param("id") id: string, @Body() body: { fechaPago?: string }) {
+  async pagar(@Param("id") id: string, @Body() body: PagarLiquidacionDto) {
     const liquidacion = await this.prisma.liquidacion.findUnique({ where: { id }, include: { viajes: true } });
     if (!liquidacion) throw new NotFoundException("Liquidación no encontrada");
     if (liquidacion.estado !== "CONFIRMADA") {

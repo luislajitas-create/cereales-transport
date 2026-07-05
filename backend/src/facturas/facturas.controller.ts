@@ -8,6 +8,8 @@ import { JwtAuthGuard } from "../auth/jwt-auth.guard";
 import { RolesGuard } from "../auth/roles.guard";
 import { Roles } from "../auth/roles.decorator";
 import { PrismaService } from "../prisma/prisma.service";
+import { CreateFacturaDto } from "./dto/create-factura.dto";
+import { RegistrarCobranzaDto } from "./dto/registrar-cobranza.dto";
 
 function fmtMoney(n: number) {
   return new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 0 }).format(n || 0);
@@ -242,7 +244,7 @@ export class FacturasController {
 
   @Roles("FACTURACION", "ADMINISTRADOR")
   @Post()
-  async create(@Body() body: any) {
+  async create(@Body() body: CreateFacturaDto) {
     const { clienteId, numero, fecha, vencimiento, viajeIds } = body;
     if (!clienteId || !numero || !fecha || !vencimiento) {
       throw new BadRequestException("clienteId, numero, fecha y vencimiento son obligatorios");
@@ -306,7 +308,7 @@ export class FacturasController {
 
   @Roles("FACTURACION", "ADMINISTRADOR")
   @Post(":id/cobranzas")
-  async registrarCobranza(@Param("id") id: string, @Body() body: any) {
+  async registrarCobranza(@Param("id") id: string, @Body() body: RegistrarCobranzaDto) {
     const factura = await this.prisma.factura.findUnique({ where: { id }, include: { cobranzas: true } });
     if (!factura) throw new NotFoundException("Factura no encontrada");
     if (factura.estado === "ANULADO") throw new BadRequestException("La factura está anulada");
