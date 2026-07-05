@@ -4,6 +4,8 @@ import * as ExcelJS from "exceljs";
 import PDFDocument = require("pdfkit");
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
 import { PrismaService } from "../prisma/prisma.service";
+import { CreateClienteDto } from "./dto/create-cliente.dto";
+import { UpdateClienteDto } from "./dto/update-cliente.dto";
 
 function fmtMoney(n: number) {
   return new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 0 }).format(n || 0);
@@ -25,7 +27,7 @@ export class ClientesController {
   }
 
   @Post()
-  create(@Body() body: any) {
+  create(@Body() body: CreateClienteDto) {
     const { contactos, ...data } = body;
     return this.prisma.cliente.create({
       data: { ...data, contactos: contactos ? { create: contactos } : undefined },
@@ -34,7 +36,7 @@ export class ClientesController {
   }
 
   @Patch(":id")
-  update(@Param("id") id: string, @Body() body: any) {
+  update(@Param("id") id: string, @Body() body: UpdateClienteDto) {
     const { contactos, ...data } = body;
     return this.prisma.cliente.update({ where: { id }, data });
   }

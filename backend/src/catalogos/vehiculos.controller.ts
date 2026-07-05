@@ -1,6 +1,8 @@
 import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from "@nestjs/common";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
 import { PrismaService } from "../prisma/prisma.service";
+import { CreateVehiculoDto } from "./dto/create-vehiculo.dto";
+import { UpdateVehiculoDto } from "./dto/update-vehiculo.dto";
 
 @UseGuards(JwtAuthGuard)
 @Controller("vehiculos")
@@ -16,12 +18,12 @@ export class VehiculosController {
   }
 
   @Post()
-  create(@Body() body: any) {
+  create(@Body() body: CreateVehiculoDto) {
     return this.prisma.vehiculo.create({ data: body });
   }
 
   @Patch(":id")
-  update(@Param("id") id: string, @Body() body: any) {
+  update(@Param("id") id: string, @Body() body: UpdateVehiculoDto) {
     return this.prisma.vehiculo.update({ where: { id }, data: body });
   }
 }

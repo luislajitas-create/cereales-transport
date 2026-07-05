@@ -4,6 +4,8 @@ import * as ExcelJS from "exceljs";
 import PDFDocument = require("pdfkit");
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
 import { PrismaService } from "../prisma/prisma.service";
+import { CreateChoferDto } from "./dto/create-chofer.dto";
+import { UpdateChoferDto } from "./dto/update-chofer.dto";
 
 @UseGuards(JwtAuthGuard)
 @Controller("choferes")
@@ -24,12 +26,12 @@ export class ChoferesController {
   }
 
   @Post()
-  create(@Body() body: any) {
+  create(@Body() body: CreateChoferDto) {
     return this.prisma.chofer.create({ data: body });
   }
 
   @Patch(":id")
-  update(@Param("id") id: string, @Body() body: any) {
+  update(@Param("id") id: string, @Body() body: UpdateChoferDto) {
     return this.prisma.chofer.update({ where: { id }, data: body });
   }
 

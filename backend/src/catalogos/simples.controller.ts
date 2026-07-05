@@ -1,13 +1,18 @@
 import { Body, Controller, Get, Param, Patch, Post, UseGuards } from "@nestjs/common";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
 import { PrismaService } from "../prisma/prisma.service";
+import { CreateCerealDto } from "./dto/create-cereal.dto";
+import { CreateUbicacionDto } from "./dto/create-ubicacion.dto";
+import { CreateTipoGastoDto } from "./dto/create-tipo-gasto.dto";
+import { CreateProductorDto } from "./dto/create-productor.dto";
+import { UpdateProductorDto } from "./dto/update-productor.dto";
 
 @UseGuards(JwtAuthGuard)
 @Controller("cereales")
 export class CerealesController {
   constructor(private prisma: PrismaService) {}
   @Get() findAll() { return this.prisma.cereal.findMany({ orderBy: { nombre: "asc" } }); }
-  @Post() create(@Body() body: any) { return this.prisma.cereal.create({ data: body }); }
+  @Post() create(@Body() body: CreateCerealDto) { return this.prisma.cereal.create({ data: body }); }
 }
 
 @UseGuards(JwtAuthGuard)
@@ -15,7 +20,7 @@ export class CerealesController {
 export class UbicacionesController {
   constructor(private prisma: PrismaService) {}
   @Get() findAll() { return this.prisma.ubicacion.findMany({ orderBy: { nombre: "asc" } }); }
-  @Post() create(@Body() body: any) { return this.prisma.ubicacion.create({ data: body }); }
+  @Post() create(@Body() body: CreateUbicacionDto) { return this.prisma.ubicacion.create({ data: body }); }
 }
 
 @UseGuards(JwtAuthGuard)
@@ -23,7 +28,7 @@ export class UbicacionesController {
 export class TiposGastoController {
   constructor(private prisma: PrismaService) {}
   @Get() findAll() { return this.prisma.tipoGasto.findMany({ orderBy: { nombre: "asc" } }); }
-  @Post() create(@Body() body: any) { return this.prisma.tipoGasto.create({ data: body }); }
+  @Post() create(@Body() body: CreateTipoGastoDto) { return this.prisma.tipoGasto.create({ data: body }); }
 }
 
 @UseGuards(JwtAuthGuard)
@@ -31,8 +36,8 @@ export class TiposGastoController {
 export class ProductoresController {
   constructor(private prisma: PrismaService) {}
   @Get() findAll() { return this.prisma.productor.findMany({ orderBy: { nombre: "asc" } }); }
-  @Post() create(@Body() body: any) { return this.prisma.productor.create({ data: body }); }
-  @Patch(":id") update(@Param("id") id: string, @Body() body: any) {
+  @Post() create(@Body() body: CreateProductorDto) { return this.prisma.productor.create({ data: body }); }
+  @Patch(":id") update(@Param("id") id: string, @Body() body: UpdateProductorDto) {
     return this.prisma.productor.update({ where: { id }, data: body });
   }
 }
