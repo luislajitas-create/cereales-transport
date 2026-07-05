@@ -9,6 +9,9 @@ import { RolesGuard } from "../auth/roles.guard";
 import { Roles } from "../auth/roles.decorator";
 import { CurrentUser } from "../auth/current-user.decorator";
 import { PrismaService } from "../prisma/prisma.service";
+import { CreateAnticipoDto } from "./dto/create-anticipo.dto";
+import { UpdateAnticipoDto } from "./dto/update-anticipo.dto";
+import { AnularAnticipoDto } from "./dto/anular-anticipo.dto";
 
 function fmtMoney(n: number) {
   return new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 0 }).format(n || 0);
@@ -200,7 +203,7 @@ export class AnticiposController {
 
   @Roles("LIQUIDACIONES", "OPERACIONES", "ADMINISTRADOR")
   @Post()
-  async create(@Body() body: any, @CurrentUser() user: any) {
+  async create(@Body() body: CreateAnticipoDto, @CurrentUser() user: any) {
     if (!body.choferId || !body.transportistaId || !body.tipoGastoId) {
       throw new BadRequestException("choferId, transportistaId y tipoGastoId son obligatorios");
     }
@@ -222,7 +225,7 @@ export class AnticiposController {
 
   @Roles("LIQUIDACIONES", "OPERACIONES", "ADMINISTRADOR")
   @Patch(":id")
-  async update(@Param("id") id: string, @Body() body: any) {
+  async update(@Param("id") id: string, @Body() body: UpdateAnticipoDto) {
     const actual = await this.prisma.anticipoGasto.findUnique({ where: { id } });
     if (!actual) throw new NotFoundException("Anticipo/gasto no encontrado");
     if (actual.liquidado) {
@@ -239,7 +242,7 @@ export class AnticiposController {
 
   @Roles("LIQUIDACIONES", "OPERACIONES", "ADMINISTRADOR")
   @Post(":id/anular")
-  async anular(@Param("id") id: string, @Body() body: { motivo: string }) {
+  async anular(@Param("id") id: string, @Body() body: AnularAnticipoDto) {
     const actual = await this.prisma.anticipoGasto.findUnique({ where: { id } });
     if (!actual) throw new NotFoundException("Anticipo/gasto no encontrado");
     if (actual.liquidado) {
