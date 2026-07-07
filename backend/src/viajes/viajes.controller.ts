@@ -18,6 +18,62 @@ const includeViaje = {
   camion: true, acoplado: true, origen: true, destino: true,
 };
 
+const VIAJE_NO_ENCONTRADO = "Viaje no encontrado";
+
+// Bloque 4.1: reglas de edición de Viaje según estado de facturación/liquidación.
+// "observaciones" y "productorId" quedan siempre editables (no participan de ningún
+// snapshot ni export de Factura/Liquidación) y por eso no aparecen en estas listas.
+const CAMPOS_SIEMPRE_EDITABLES = ["observaciones", "productorId"];
+const CAMPOS_BLOQUEADOS_FACTURACION = [
+  "fecha", "cartaPorte", "ctg", "clienteId", "cerealId", "origenId", "destinoId",
+  "transportistaId", "toneladas", "tarifaTonelada",
+];
+const CAMPOS_BLOQUEADOS_LIQUIDACION = [
+  "fecha", "toneladas", "tarifaTonelada", "transportistaId", "choferId", "camionId",
+  "acopladoId", "cerealId", "origenId", "destinoId",
+];
+const CAMPOS_COMPARABLES = [
+  "fecha", "cartaPorte", "ctg", "cerealId", "clienteId", "productorId", "transportistaId",
+  "choferId", "camionId", "acopladoId", "origenId", "destinoId", "toneladas", "tarifaTonelada",
+  "observaciones",
+];
+
+function valorDistinto(campo: string, nuevo: any, actual: any): boolean {
+  if (nuevo === undefined) return false;
+  if (campo === "fecha") return new Date(nuevo).getTime() !== new Date(actual.fecha).getTime();
+  if (campo === "toneladas" || campo === "tarifaTonelada") return Number(nuevo) !== actual[campo];
+  return (nuevo || null) !== (actual[campo] || null);
+}
+
+function camposModificados(body: Record<string, any>, actual: any): string[] {
+  return CAMPOS_COMPARABLES.filter((campo) => valorDistinto(campo, body[campo], actual));
+}
+
+// Condiciones repetidas entre update() (bloqueo de edición) y assertCancelacionPermitida()
+// (bloqueo de cancelación) — centralizadas para no duplicar la comparación contra el enum.
+function estaFacturado(viaje: any): boolean {
+  return viaje.estadoFacturacion !== "PENDIENTE_DE_FACTURAR";
+}
+
+function estaLiquidado(viaje: any): boolean {
+  return viaje.estadoLiquidacion !== "PENDIENTE";
+}
+
+// Filtra "modificados" contra "camposBloqueados" y agrega un mensaje a "mensajes" solo si
+// alguno de los campos efectivamente cambiados está bloqueado — evita repetir en update()
+// el mismo patrón "filtrar + ¿hay algo? + construir mensaje" para cada motivo de bloqueo.
+function agregarBloqueoSiCorresponde(
+  mensajes: string[],
+  modificados: string[],
+  camposBloqueados: string[],
+  prefijo: string,
+): void {
+  const bloqueados = modificados.filter((campo) => camposBloqueados.includes(campo));
+  if (bloqueados.length > 0) {
+    mensajes.push(`${prefijo} ${bloqueados.join(", ")}.`);
+  }
+}
+
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller("viajes")
 export class ViajesController {
@@ -71,7 +127,7 @@ export class ViajesController {
         facturaViaje: { include: { factura: true } },
       },
     });
-    if (!viaje) throw new NotFoundException("Viaje no encontrado");
+    if (!viaje) throw new NotFoundException(VIAJE_NO_ENCONTRADO);
     return viaje;
   }
 
@@ -110,10 +166,40 @@ export class ViajesController {
   @Roles("OPERACIONES", "ADMINISTRADOR")
   @Patch(":id")
   async update(@Param("id") id: string, @Body() body: UpdateViajeDto) {
+    const actual = await this.prisma.viaje.findUnique({ where: { id } });
+    if (!actual) throw new NotFoundException(VIAJE_NO_ENCONTRADO);
+
+    const modificados = camposModificados(body as Record<string, any>, actual);
+
+    if (actual.estado === "CANCELADO") {
+      const rechazados = modificados.filter((c) => !CAMPOS_SIEMPRE_EDITABLES.includes(c));
+      if (rechazados.length > 0) {
+        throw new BadRequestException(
+          `No se puede editar el viaje: está cancelado. Solo se puede modificar "observaciones" y "productorId". Campos rechazados: ${rechazados.join(", ")}.`,
+        );
+      }
+    }
+
+    const mensajes: string[] = [];
+    if (estaFacturado(actual)) {
+      agregarBloqueoSiCorresponde(
+        mensajes, modificados, CAMPOS_BLOQUEADOS_FACTURACION,
+        `No se puede editar el viaje: ya está facturado (estado de facturación: ${actual.estadoFacturacion}). Anule la factura asociada para poder editar:`,
+      );
+    }
+    if (estaLiquidado(actual)) {
+      agregarBloqueoSiCorresponde(
+        mensajes, modificados, CAMPOS_BLOQUEADOS_LIQUIDACION,
+        `No se puede editar el viaje: ya está liquidado (estado de liquidación: ${actual.estadoLiquidacion}). Anule la liquidación asociada para poder editar:`,
+      );
+    }
+    if (mensajes.length > 0) {
+      throw new BadRequestException(mensajes.join(" "));
+    }
+
     const data: any = { ...body };
     delete data.estado;
     if (data.toneladas || data.tarifaTonelada) {
-      const actual = await this.prisma.viaje.findUnique({ where: { id } });
       const toneladas = Number(data.toneladas ?? actual.toneladas);
       const tarifa = Number(data.tarifaTonelada ?? actual.tarifaTonelada);
       data.toneladas = toneladas;
@@ -128,11 +214,12 @@ export class ViajesController {
   @Post(":id/estado")
   async cambiarEstado(@Param("id") id: string, @Body() body: CambiarEstadoDto, @CurrentUser() user: any) {
     const viaje = await this.prisma.viaje.findUnique({ where: { id } });
-    if (!viaje) throw new NotFoundException("Viaje no encontrado");
+    if (!viaje) throw new NotFoundException(VIAJE_NO_ENCONTRADO);
     if (viaje.estado === "CANCELADO") throw new BadRequestException("El viaje está cancelado");
 
     const nuevo = body.estado;
     if (nuevo === "CANCELADO") {
+      ViajesController.assertCancelacionPermitida(viaje);
       return this.aplicarCambioEstado(viaje, "CANCELADO", user);
     }
     const idxActual = ORDEN_ESTADOS.indexOf(viaje.estado);
@@ -150,8 +237,31 @@ export class ViajesController {
   @Post(":id/cancelar")
   async cancelar(@Param("id") id: string, @Body() body: CancelarViajeDto, @CurrentUser() user: any) {
     const viaje = await this.prisma.viaje.findUnique({ where: { id } });
-    if (!viaje) throw new NotFoundException("Viaje no encontrado");
+    if (!viaje) throw new NotFoundException(VIAJE_NO_ENCONTRADO);
+    ViajesController.assertCancelacionPermitida(viaje);
     return this.aplicarCambioEstado(viaje, "CANCELADO", user, body.motivo);
+  }
+
+  // No usa `this` (no depende de estado de instancia): static por legibilidad, para que
+  // quede claro en la firma que es una validación pura sobre el `viaje` recibido.
+  private static assertCancelacionPermitida(viaje: any) {
+    if (viaje.estado === "CANCELADO") {
+      throw new BadRequestException("El viaje ya está cancelado.");
+    }
+    const mensajes: string[] = [];
+    if (estaFacturado(viaje)) {
+      mensajes.push(
+        `No se puede cancelar el viaje: está facturado (estado de facturación: ${viaje.estadoFacturacion}). Anule la factura asociada primero.`,
+      );
+    }
+    if (estaLiquidado(viaje)) {
+      mensajes.push(
+        `No se puede cancelar el viaje: está liquidado (estado de liquidación: ${viaje.estadoLiquidacion}). Anule la liquidación asociada primero.`,
+      );
+    }
+    if (mensajes.length > 0) {
+      throw new BadRequestException(mensajes.join(" "));
+    }
   }
 
   private async aplicarCambioEstado(viaje: any, nuevo: string, user: any, motivo?: string) {
