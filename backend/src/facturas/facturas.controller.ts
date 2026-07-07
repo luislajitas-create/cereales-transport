@@ -1,5 +1,5 @@
 import {
-  Body, Controller, Get, Param, Post, Query, Res, UseGuards, BadRequestException, NotFoundException,
+  Body, Controller, Get, Param, Post, Query, Res, UseGuards, BadRequestException, ConflictException, NotFoundException,
 } from "@nestjs/common";
 import { Response } from "express";
 import * as ExcelJS from "exceljs";
@@ -7,9 +7,19 @@ import PDFDocument = require("pdfkit");
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
 import { RolesGuard } from "../auth/roles.guard";
 import { Roles } from "../auth/roles.decorator";
+import { CurrentUser } from "../auth/current-user.decorator";
 import { PrismaService } from "../prisma/prisma.service";
 import { CreateFacturaDto } from "./dto/create-factura.dto";
 import { RegistrarCobranzaDto } from "./dto/registrar-cobranza.dto";
+import { AnularCobranzaDto } from "./dto/anular-cobranza.dto";
+
+const TOLERANCIA_REDONDEO = 0.01;
+
+function calcularEstadoFactura(importeFactura: number, totalCobradoVigente: number): "FACTURADO" | "COBRADO_PARCIAL" | "COBRADO_TOTAL" {
+  if (totalCobradoVigente >= importeFactura) return "COBRADO_TOTAL";
+  if (totalCobradoVigente > 0) return "COBRADO_PARCIAL";
+  return "FACTURADO";
+}
 
 function fmtMoney(n: number) {
   return new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 0 }).format(n || 0);
@@ -302,8 +312,8 @@ export class FacturasController {
   async anular(@Param("id") id: string) {
     const factura = await this.prisma.factura.findUnique({ where: { id }, include: { viajes: true, cobranzas: true } });
     if (!factura) throw new NotFoundException("Factura no encontrada");
-    if (factura.cobranzas.length > 0) {
-      throw new BadRequestException("No se puede anular una factura con cobranzas registradas");
+    if (factura.cobranzas.some((c) => !c.anulada)) {
+      throw new BadRequestException("No se puede anular una factura con cobranzas vigentes registradas");
     }
     return this.prisma.$transaction(async (tx) => {
       await tx.factura.update({ where: { id }, data: { estado: "ANULADO" } });
@@ -317,27 +327,96 @@ export class FacturasController {
   @Roles("FACTURACION", "ADMINISTRADOR")
   @Post(":id/cobranzas")
   async registrarCobranza(@Param("id") id: string, @Body() body: RegistrarCobranzaDto) {
-    const factura = await this.prisma.factura.findUnique({ where: { id }, include: { cobranzas: true } });
-    if (!factura) throw new NotFoundException("Factura no encontrada");
-    if (factura.estado === "ANULADO") throw new BadRequestException("La factura está anulada");
     if (!body.fecha || body.importe === undefined) {
       throw new BadRequestException("fecha e importe son obligatorios");
     }
+    const importeNuevo = Number(body.importe);
+    const fechaNueva = new Date(body.fecha);
+    const medioPagoNuevo = body.medioPago || null;
 
     return this.prisma.$transaction(async (tx) => {
+      // Bloquea la fila de la factura durante toda la transacción para que dos cobranzas
+      // concurrentes sobre la misma factura no lean el mismo saldo "disponible" a la vez
+      // (el updateMany condicionado de otros bloques no alcanza acá: el tope depende de la
+      // suma de varias filas de Cobranza, no del estado de una sola fila).
+      await tx.$queryRaw`SELECT id FROM "Factura" WHERE id = ${id} FOR UPDATE`;
+
+      const factura = await tx.factura.findUnique({ where: { id }, include: { cobranzas: true } });
+      if (!factura) throw new NotFoundException("Factura no encontrada");
+      if (factura.estado === "ANULADO") throw new BadRequestException("La factura está anulada");
+
+      const vigentes = factura.cobranzas.filter((c) => !c.anulada);
+      const totalCobradoVigente = vigentes.reduce((acc, c) => acc + c.importe, 0);
+
+      const duplicada = vigentes.some(
+        (c) => new Date(c.fecha).getTime() === fechaNueva.getTime() && c.importe === importeNuevo && (c.medioPago || null) === medioPagoNuevo,
+      );
+      if (duplicada) {
+        throw new ConflictException(
+          "Ya existe una cobranza vigente idéntica (misma fecha, importe y medio de pago) para esta factura",
+        );
+      }
+
+      if (totalCobradoVigente + importeNuevo > factura.importe + TOLERANCIA_REDONDEO) {
+        throw new BadRequestException(
+          `El importe supera el saldo pendiente de la factura: saldo actual ${factura.importe - totalCobradoVigente}, intentado ${importeNuevo}.`,
+        );
+      }
+
       await tx.cobranza.create({
         data: {
           facturaId: id,
-          fecha: new Date(body.fecha),
-          importe: Number(body.importe),
-          medioPago: body.medioPago || null,
+          fecha: fechaNueva,
+          importe: importeNuevo,
+          medioPago: medioPagoNuevo,
           observacion: body.observacion || null,
         },
       });
-      const cobranzas = await tx.cobranza.findMany({ where: { facturaId: id } });
-      const totalCobrado = cobranzas.reduce((acc, c) => acc + c.importe, 0);
-      const nuevoEstado = totalCobrado >= factura.importe ? "COBRADO_TOTAL" : totalCobrado > 0 ? "COBRADO_PARCIAL" : "FACTURADO";
-      await tx.factura.update({ where: { id }, data: { estado: nuevoEstado as any } });
+      const nuevoEstado = calcularEstadoFactura(factura.importe, totalCobradoVigente + importeNuevo);
+      await tx.factura.update({ where: { id }, data: { estado: nuevoEstado } });
+      return tx.factura.findUnique({ where: { id }, include: includeFactura });
+    });
+  }
+
+  @Roles("FACTURACION", "ADMINISTRADOR")
+  @Post(":id/cobranzas/:cobranzaId/anular")
+  async anularCobranza(
+    @Param("id") id: string,
+    @Param("cobranzaId") cobranzaId: string,
+    @Body() body: AnularCobranzaDto,
+    @CurrentUser() user: any,
+  ) {
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM "Factura" WHERE id = ${id} FOR UPDATE`;
+
+      const factura = await tx.factura.findUnique({ where: { id }, include: { cobranzas: true } });
+      if (!factura) throw new NotFoundException("Factura no encontrada");
+
+      const cobranza = factura.cobranzas.find((c) => c.id === cobranzaId);
+      if (!cobranza) throw new NotFoundException("Cobranza no encontrada para esta factura");
+      if (cobranza.anulada) throw new BadRequestException("La cobranza ya está anulada");
+
+      const anuladaFecha = new Date();
+      await tx.cobranza.update({
+        where: { id: cobranzaId },
+        data: { anulada: true, anuladaMotivo: body.motivo || null, anuladaFecha },
+      });
+      await tx.auditLog.create({
+        data: {
+          usuarioId: user?.id || null,
+          entidad: "Cobranza",
+          entidadId: cobranzaId,
+          accion: "anular",
+          datosAnteriores: { importe: cobranza.importe, fecha: cobranza.fecha, medioPago: cobranza.medioPago },
+          datosNuevos: { anulada: true, motivo: body.motivo || null },
+        },
+      });
+
+      const totalCobradoVigente = factura.cobranzas
+        .filter((c) => !c.anulada && c.id !== cobranzaId)
+        .reduce((acc, c) => acc + c.importe, 0);
+      const nuevoEstado = calcularEstadoFactura(factura.importe, totalCobradoVigente);
+      await tx.factura.update({ where: { id }, data: { estado: nuevoEstado } });
       return tx.factura.findUnique({ where: { id }, include: includeFactura });
     });
   }

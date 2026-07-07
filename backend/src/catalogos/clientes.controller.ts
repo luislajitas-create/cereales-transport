@@ -143,7 +143,7 @@ export class ClientesController {
   async cuentaCorriente(@Param("id") id: string) {
     const facturas = await this.prisma.factura.findMany({
       where: { clienteId: id },
-      include: { cobranzas: true },
+      include: { cobranzas: { where: { anulada: false } } },
       orderBy: { fecha: "asc" },
     });
     const raw: any[] = [];

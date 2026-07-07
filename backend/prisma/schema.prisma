@@ -380,12 +380,15 @@ model FacturaViaje {
 }
 
 model Cobranza {
-  id          String   @id @default(uuid())
-  facturaId   String
-  fecha       DateTime
-  importe     Float
-  medioPago   String?
-  observacion String?
+  id            String    @id @default(uuid())
+  facturaId     String
+  fecha         DateTime
+  importe       Float
+  medioPago     String?
+  observacion   String?
+  anulada       Boolean   @default(false)
+  anuladaMotivo String?
+  anuladaFecha  DateTime?
 
   factura Factura @relation(fields: [facturaId], references: [id], onDelete: Cascade)
 

@@ -31,7 +31,7 @@ export class DashboardController {
       }),
       this.prisma.factura.findMany({
         where: { vencimiento: { lt: hoy }, estado: { in: ["FACTURADO", "COBRADO_PARCIAL"] } },
-        include: { cliente: true, cobranzas: true },
+        include: { cliente: true, cobranzas: { where: { anulada: false } } },
       }),
       this.prisma.liquidacion.aggregate({
         where: { estado: "CONFIRMADA" },
