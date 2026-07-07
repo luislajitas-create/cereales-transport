@@ -124,7 +124,7 @@ export class ViajesController {
         historial: { orderBy: { fecha: "asc" }, include: { usuario: true } },
         anticipos: { include: { tipoGasto: true } },
         liquidacionesViaje: { include: { liquidacion: true } },
-        facturaViaje: { include: { factura: true } },
+        facturasViaje: { include: { factura: true } },
       },
     });
     if (!viaje) throw new NotFoundException(VIAJE_NO_ENCONTRADO);

@@ -189,7 +189,7 @@ export class FacturasController {
 
     const viajes = await this.prisma.viaje.findMany({
       where: whereViaje,
-      include: { cliente: true, cereal: true, origen: true, destino: true, facturaViaje: true },
+      include: { cliente: true, cereal: true, origen: true, destino: true },
       orderBy: { fecha: "asc" },
     });
 
@@ -210,7 +210,7 @@ export class FacturasController {
       const acc = porCliente.get(key);
       acc.toneladasRealizadas += v.toneladas;
       acc.importeRealizado += v.importeTotal;
-      if (v.facturaViaje) {
+      if (v.estadoFacturacion !== "PENDIENTE_DE_FACTURAR") {
         acc.toneladasFacturadas += v.toneladas;
         acc.importeFacturado += v.importeTotal;
       } else {
@@ -280,10 +280,18 @@ export class FacturasController {
         },
       });
       for (const v of viajes) {
+        const { count } = await tx.viaje.updateMany({
+          where: { id: v.id, estadoFacturacion: "PENDIENTE_DE_FACTURAR" },
+          data: { estadoFacturacion: "FACTURADO" },
+        });
+        if (count === 0) {
+          throw new BadRequestException(
+            "Uno de los viajes seleccionados ya fue facturado por otra operación en curso",
+          );
+        }
         await tx.facturaViaje.create({
           data: { facturaId: factura.id, viajeId: v.id, importeViaje: v.importeTotal },
         });
-        await tx.viaje.update({ where: { id: v.id }, data: { estadoFacturacion: "FACTURADO" } });
       }
       return tx.factura.findUnique({ where: { id: factura.id }, include: includeFactura });
     });

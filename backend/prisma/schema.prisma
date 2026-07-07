@@ -232,7 +232,7 @@ model Viaje {
   historial          HistorialEstadoViaje[]
   anticipos           AnticipoGasto[]
   liquidacionesViaje   LiquidacionViaje[]
-  facturaViaje         FacturaViaje?
+  facturasViaje        FacturaViaje[]
   liquidacionMovimientos LiquidacionMovimiento[]
 
   @@index([fecha])
@@ -369,13 +369,14 @@ model Factura {
 model FacturaViaje {
   id            String  @id @default(uuid())
   facturaId     String
-  viajeId       String  @unique
+  viajeId       String
   importeViaje  Float
 
   factura Factura @relation(fields: [facturaId], references: [id], onDelete: Cascade)
   viaje   Viaje   @relation(fields: [viajeId], references: [id])
 
   @@index([facturaId])
+  @@index([viajeId])
 }
 
 model Cobranza {
