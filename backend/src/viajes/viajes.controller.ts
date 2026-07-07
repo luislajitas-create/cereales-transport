@@ -67,7 +67,7 @@ export class ViajesController {
         ...includeViaje,
         historial: { orderBy: { fecha: "asc" }, include: { usuario: true } },
         anticipos: { include: { tipoGasto: true } },
-        liquidacionViaje: { include: { liquidacion: true } },
+        liquidacionesViaje: { include: { liquidacion: true } },
         facturaViaje: { include: { factura: true } },
       },
     });

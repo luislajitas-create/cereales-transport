@@ -231,7 +231,7 @@ model Viaje {
 
   historial          HistorialEstadoViaje[]
   anticipos           AnticipoGasto[]
-  liquidacionViaje     LiquidacionViaje?
+  liquidacionesViaje   LiquidacionViaje[]
   facturaViaje         FacturaViaje?
   liquidacionMovimientos LiquidacionMovimiento[]
 
@@ -315,7 +315,7 @@ model Liquidacion {
 model LiquidacionViaje {
   id            String  @id @default(uuid())
   liquidacionId String
-  viajeId       String  @unique
+  viajeId       String
   subtotal      Float
   comisionPct   Float
   comisionMonto Float
@@ -325,6 +325,7 @@ model LiquidacionViaje {
   viaje       Viaje       @relation(fields: [viajeId], references: [id])
 
   @@index([liquidacionId])
+  @@index([viajeId])
 }
 
 model LiquidacionMovimiento {

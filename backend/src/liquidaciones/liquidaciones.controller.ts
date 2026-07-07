@@ -397,6 +397,16 @@ export class LiquidacionesController {
       }
 
       for (const v of viajes) {
+        const { count: viajeCount } = await tx.viaje.updateMany({
+          where: { id: v.id, estadoLiquidacion: "PENDIENTE" },
+          data: { estadoLiquidacion: "LIQUIDADO" },
+        });
+        if (viajeCount === 0) {
+          throw new BadRequestException(
+            "Uno de los viajes seleccionados ya fue liquidado por otra operación en curso",
+          );
+        }
+
         const subtotal = v.importeTotal;
         const comisionMonto = subtotal * (pct / 100);
         const totalViaje = subtotal - comisionMonto;
@@ -410,7 +420,6 @@ export class LiquidacionesController {
             totalViaje,
           },
         });
-        await tx.viaje.update({ where: { id: v.id }, data: { estadoLiquidacion: "LIQUIDADO" } });
       }
 
       for (const a of anticipos) {
