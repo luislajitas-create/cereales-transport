@@ -5,6 +5,7 @@ import { Prisma } from "@prisma/client";
 const CAMPO_LEGIBLE: Record<string, string> = {
   cuit: "CUIT",
   cuil: "CUIL",
+  dni: "DNI",
   patente: "patente",
   ctg: "CTG",
   numero: "número de factura",

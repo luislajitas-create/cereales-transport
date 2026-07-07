@@ -114,7 +114,7 @@ model Contacto {
 model Productor {
   id        String  @id @default(uuid())
   nombre    String
-  cuit      String?
+  cuit      String? @unique
   localidad String?
   viajes    Viaje[]
 }
@@ -138,7 +138,7 @@ model Chofer {
   id                  String   @id @default(uuid())
   transportistaId     String
   nombre              String
-  dni                 String?
+  dni                 String?  @unique
   cuil                String   @unique
   comisionPct         Float    @default(0)
   licenciaNumero      String?
@@ -276,6 +276,7 @@ model AnticipoGasto {
   transportista Transportista @relation(fields: [transportistaId], references: [id])
   tipoGasto     TipoGasto     @relation(fields: [tipoGastoId], references: [id])
   usuario       Usuario?      @relation(fields: [usuarioId], references: [id])
+  liquidacionMovimientos LiquidacionMovimiento[]
 
   @@index([choferId, fecha])
   @@index([transportistaId, fecha])
@@ -327,20 +328,23 @@ model LiquidacionViaje {
 }
 
 model LiquidacionMovimiento {
-  id            String   @id @default(uuid())
-  liquidacionId String
-  viajeId       String?
-  tipoGastoId   String
-  importe       Float
-  fecha         DateTime
-  observacion   String?
+  id              String   @id @default(uuid())
+  liquidacionId   String
+  viajeId         String?
+  tipoGastoId     String
+  anticipoGastoId String?
+  importe         Float
+  fecha           DateTime
+  observacion     String?
   comprobanteUrl String?
 
-  liquidacion Liquidacion @relation(fields: [liquidacionId], references: [id], onDelete: Cascade)
-  viaje       Viaje?      @relation(fields: [viajeId], references: [id])
-  tipoGasto   TipoGasto   @relation(fields: [tipoGastoId], references: [id])
+  liquidacion   Liquidacion    @relation(fields: [liquidacionId], references: [id], onDelete: Cascade)
+  viaje         Viaje?         @relation(fields: [viajeId], references: [id])
+  tipoGasto     TipoGasto      @relation(fields: [tipoGastoId], references: [id])
+  anticipoGasto AnticipoGasto? @relation(fields: [anticipoGastoId], references: [id])
 
   @@index([liquidacionId])
+  @@index([anticipoGastoId])
 }
 
 model Factura {

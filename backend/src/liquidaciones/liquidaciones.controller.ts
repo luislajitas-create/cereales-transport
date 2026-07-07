@@ -399,13 +399,22 @@ export class LiquidacionesController {
             liquidacionId: creada.id,
             viajeId: a.viajeId || null,
             tipoGastoId: a.tipoGastoId,
+            anticipoGastoId: a.id,
             importe: a.importe,
             fecha: a.fecha,
             observacion: a.observaciones || null,
             comprobanteUrl: a.comprobanteUrl || null,
           },
         });
-        await tx.anticipoGasto.update({ where: { id: a.id }, data: { liquidado: true } });
+        const { count } = await tx.anticipoGasto.updateMany({
+          where: { id: a.id, liquidado: false },
+          data: { liquidado: true },
+        });
+        if (count === 0) {
+          throw new BadRequestException(
+            "Uno de los anticipos/gastos seleccionados ya fue liquidado por otra operación en curso",
+          );
+        }
       }
 
       return creada.id;
@@ -466,12 +475,30 @@ export class LiquidacionesController {
       for (const lv of liquidacion.viajes) {
         await tx.viaje.update({ where: { id: lv.viajeId }, data: { estadoLiquidacion: "PENDIENTE" } });
       }
-      const anticipoViajeIds = liquidacion.movimientos.map((m) => m.viajeId).filter(Boolean);
-      if (anticipoViajeIds.length > 0) {
+      const anticipoGastoIds = liquidacion.movimientos.map((m) => m.anticipoGastoId).filter(Boolean) as string[];
+      if (anticipoGastoIds.length > 0) {
         await tx.anticipoGasto.updateMany({
           where: {
             liquidado: true,
-            viajeId: { in: anticipoViajeIds as string[] },
+            id: { in: anticipoGastoIds },
+          },
+          data: { liquidado: false },
+        });
+      }
+
+      // Ruta legacy: movimientos creados antes de existir anticipoGastoId (sin backfill,
+      // ver BLOQUE3_DISENO_INTEGRIDAD_DATOS.md) solo pueden revertirse por viajeId, con el
+      // mismo riesgo de contaminación cruzada que tenía el código anterior para esos casos.
+      const movimientosLegacy = liquidacion.movimientos.filter((m) => !m.anticipoGastoId && m.viajeId);
+      const viajeIdsLegacy = movimientosLegacy.map((m) => m.viajeId).filter(Boolean) as string[];
+      if (viajeIdsLegacy.length > 0) {
+        console.warn(
+          `[LiquidacionesController.anular] liquidacion ${id}: revirtiendo ${viajeIdsLegacy.length} movimiento(s) legacy sin anticipoGastoId por viajeId`,
+        );
+        await tx.anticipoGasto.updateMany({
+          where: {
+            liquidado: true,
+            viajeId: { in: viajeIdsLegacy },
           },
           data: { liquidado: false },
         });
