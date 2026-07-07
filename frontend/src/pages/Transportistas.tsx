@@ -6,8 +6,9 @@ export default function Transportistas() {
   const [nuevo, setNuevo] = useState({ razonSocial: "", cuit: "", domicilio: "" });
   const [error, setError] = useState("");
   const [expandido, setExpandido] = useState<string | null>(null);
-  const [nuevoChofer, setNuevoChofer] = useState({ nombre: "", dni: "", cuil: "", licenciaNumero: "" });
+  const [nuevoChofer, setNuevoChofer] = useState({ nombre: "", dni: "", cuil: "", licenciaNumero: "", comisionPct: "0" });
   const [nuevoVehiculo, setNuevoVehiculo] = useState({ patente: "", marca: "", modelo: "", tipo: "CAMION", capacidadKg: "" });
+  const [comisionEdit, setComisionEdit] = useState<Record<string, string>>({});
 
   function cargar() {
     api.get("/transportistas").then((res) => setTransportistas(res.data));
@@ -29,11 +30,22 @@ export default function Transportistas() {
   async function agregarChofer(transportistaId: string, e: React.FormEvent) {
     e.preventDefault();
     try {
-      await api.post("/choferes", { ...nuevoChofer, transportistaId });
-      setNuevoChofer({ nombre: "", dni: "", cuil: "", licenciaNumero: "" });
+      await api.post("/choferes", { ...nuevoChofer, comisionPct: Number(nuevoChofer.comisionPct) || 0, transportistaId });
+      setNuevoChofer({ nombre: "", dni: "", cuil: "", licenciaNumero: "", comisionPct: "0" });
       cargar();
     } catch (err: any) {
       setError(err?.response?.data?.message || "No se pudo agregar el chofer");
+    }
+  }
+
+  async function guardarComision(choferId: string) {
+    setError("");
+    try {
+      await api.patch(`/choferes/${choferId}`, { comisionPct: Number(comisionEdit[choferId]) || 0 });
+      setComisionEdit((prev) => { const next = { ...prev }; delete next[choferId]; return next; });
+      cargar();
+    } catch (err: any) {
+      setError(err?.response?.data?.message || "No se pudo actualizar la comisión");
     }
   }
 
@@ -84,11 +96,52 @@ export default function Transportistas() {
             <>
               <div className="section-title">Choferes</div>
               <table>
-                <thead><tr><th>Nombre</th><th>DNI</th><th>CUIL</th><th>Licencia</th></tr></thead>
+                <thead><tr><th>Nombre</th><th>DNI</th><th>CUIL</th><th>Licencia</th><th>Comisión %</th><th></th></tr></thead>
                 <tbody>
-                  {t.choferes.map((c: any) => (
-                    <tr key={c.id}><td>{c.nombre}</td><td>{c.dni || "—"}</td><td>{c.cuil}</td><td>{c.licenciaNumero || "—"}</td></tr>
-                  ))}
+                  {t.choferes.map((c: any) => {
+                    const editando = comisionEdit[c.id] !== undefined;
+                    return (
+                      <tr key={c.id}>
+                        <td>{c.nombre}</td>
+                        <td>{c.dni || "—"}</td>
+                        <td>{c.cuil}</td>
+                        <td>{c.licenciaNumero || "—"}</td>
+                        <td>
+                          {editando ? (
+                            <input
+                              type="number"
+                              step="0.01"
+                              style={{ width: "5rem" }}
+                              value={comisionEdit[c.id]}
+                              onChange={(e) => setComisionEdit({ ...comisionEdit, [c.id]: e.target.value })}
+                            />
+                          ) : (
+                            c.comisionPct
+                          )}
+                        </td>
+                        <td>
+                          {editando ? (
+                            <>
+                              <button className="btn secondary" onClick={() => guardarComision(c.id)}>Guardar</button>{" "}
+                              <button
+                                className="btn secondary"
+                                onClick={() => setComisionEdit((prev) => { const next = { ...prev }; delete next[c.id]; return next; })}
+                              >
+                                Cancelar
+                              </button>
+                            </>
+                          ) : (
+                            <button
+                              className="btn secondary"
+                              onClick={() => setComisionEdit({ ...comisionEdit, [c.id]: String(c.comisionPct) })}
+                            >
+                              Editar
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
               <form onSubmit={(e) => agregarChofer(t.id, e)} className="filters" style={{ marginTop: "0.6rem" }}>
@@ -96,6 +149,7 @@ export default function Transportistas() {
                 <input placeholder="DNI" value={nuevoChofer.dni} onChange={(e) => setNuevoChofer({ ...nuevoChofer, dni: e.target.value })} />
                 <input placeholder="CUIL" value={nuevoChofer.cuil} onChange={(e) => setNuevoChofer({ ...nuevoChofer, cuil: e.target.value })} required />
                 <input placeholder="N° Licencia" value={nuevoChofer.licenciaNumero} onChange={(e) => setNuevoChofer({ ...nuevoChofer, licenciaNumero: e.target.value })} />
+                <input placeholder="Comisión %" type="number" step="0.01" style={{ width: "6rem" }} value={nuevoChofer.comisionPct} onChange={(e) => setNuevoChofer({ ...nuevoChofer, comisionPct: e.target.value })} />
                 <button className="btn" type="submit">+ Chofer</button>
               </form>
 

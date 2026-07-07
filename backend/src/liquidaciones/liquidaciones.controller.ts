@@ -329,7 +329,14 @@ export class LiquidacionesController {
       throw new BadRequestException("Debe incluir al menos un viaje");
     }
 
-    const pct = Number(comisionPct ?? 0);
+    let chofer: { id: string; comisionPct: number } | null = null;
+    if (tipo === "CHOFER") {
+      chofer = await this.prisma.chofer.findUnique({ where: { id: choferId } });
+      if (!chofer) throw new NotFoundException("Chofer no encontrado");
+    }
+
+    const pctChoferDefault = chofer?.comisionPct ?? 0;
+    const pct = comisionPct !== undefined && comisionPct !== null ? Number(comisionPct) : pctChoferDefault;
 
     const viajes = await this.prisma.viaje.findMany({
       where: {
@@ -375,6 +382,19 @@ export class LiquidacionesController {
           creadoPorId: user?.id || null,
         },
       });
+
+      if (chofer && pct !== chofer.comisionPct) {
+        await tx.auditLog.create({
+          data: {
+            usuarioId: user?.id || null,
+            entidad: "Liquidacion",
+            entidadId: creada.id,
+            accion: "comisionPct_override",
+            datosAnteriores: { comisionPctChofer: chofer.comisionPct },
+            datosNuevos: { comisionPctUsado: pct },
+          },
+        });
+      }
 
       for (const v of viajes) {
         const subtotal = v.importeTotal;

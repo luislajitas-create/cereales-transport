@@ -136,7 +136,15 @@ export default function Liquidaciones() {
           {form.tipo === "CHOFER" && (
             <div className="field">
               <label>Chofer</label>
-              <select value={form.choferId} onChange={(e) => setForm({ ...form, choferId: e.target.value })} required>
+              <select
+                value={form.choferId}
+                onChange={(e) => {
+                  const choferId = e.target.value;
+                  const chofer = choferes.find((c) => c.id === choferId);
+                  setForm({ ...form, choferId, comisionPct: chofer ? String(chofer.comisionPct) : form.comisionPct });
+                }}
+                required
+              >
                 <option value="">Seleccionar...</option>
                 {choferes.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
               </select>
@@ -153,6 +161,11 @@ export default function Liquidaciones() {
           <div className="field">
             <label>Comisión (%)</label>
             <input type="number" step="0.01" value={form.comisionPct} onChange={(e) => setForm({ ...form, comisionPct: e.target.value })} />
+            {form.tipo === "CHOFER" && form.choferId && (
+              <span className="muted" style={{ fontSize: "0.8em" }}>
+                Precompletado desde el chofer — se puede modificar como excepción.
+              </span>
+            )}
           </div>
         </div>
         <div className="actions-row"><button className="btn secondary" onClick={buscarCandidatos}>Buscar viajes y gastos pendientes</button></div>
