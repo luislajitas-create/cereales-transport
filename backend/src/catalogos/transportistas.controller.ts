@@ -3,11 +3,13 @@ import { Response } from "express";
 import * as ExcelJS from "exceljs";
 import PDFDocument = require("pdfkit");
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
+import { RolesGuard } from "../auth/roles.guard";
+import { Roles } from "../auth/roles.decorator";
 import { PrismaService } from "../prisma/prisma.service";
 import { CreateTransportistaDto } from "./dto/create-transportista.dto";
 import { UpdateTransportistaDto } from "./dto/update-transportista.dto";
 
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
 @Controller("transportistas")
 export class TransportistasController {
   constructor(private prisma: PrismaService) {}
@@ -28,16 +30,19 @@ export class TransportistasController {
     });
   }
 
+  @Roles("OPERACIONES", "ADMINISTRADOR")
   @Post()
   create(@Body() body: CreateTransportistaDto) {
     return this.prisma.transportista.create({ data: body });
   }
 
+  @Roles("OPERACIONES", "ADMINISTRADOR")
   @Patch(":id")
   update(@Param("id") id: string, @Body() body: UpdateTransportistaDto) {
     return this.prisma.transportista.update({ where: { id }, data: body });
   }
 
+  @Roles("OPERACIONES", "ADMINISTRADOR")
   @Delete(":id")
   remove(@Param("id") id: string) {
     return this.prisma.transportista.update({ where: { id }, data: { activo: false } });

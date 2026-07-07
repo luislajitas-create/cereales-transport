@@ -3,11 +3,13 @@ import { Response } from "express";
 import * as ExcelJS from "exceljs";
 import PDFDocument = require("pdfkit");
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
+import { RolesGuard } from "../auth/roles.guard";
+import { Roles } from "../auth/roles.decorator";
 import { PrismaService } from "../prisma/prisma.service";
 import { CreateChoferDto } from "./dto/create-chofer.dto";
 import { UpdateChoferDto } from "./dto/update-chofer.dto";
 
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
 @Controller("choferes")
 export class ChoferesController {
   constructor(private prisma: PrismaService) {}
@@ -25,11 +27,13 @@ export class ChoferesController {
     return this.prisma.chofer.findUnique({ where: { id } });
   }
 
+  @Roles("OPERACIONES", "LIQUIDACIONES", "ADMINISTRADOR")
   @Post()
   create(@Body() body: CreateChoferDto) {
     return this.prisma.chofer.create({ data: body });
   }
 
+  @Roles("OPERACIONES", "LIQUIDACIONES", "ADMINISTRADOR")
   @Patch(":id")
   update(@Param("id") id: string, @Body() body: UpdateChoferDto) {
     return this.prisma.chofer.update({ where: { id }, data: body });

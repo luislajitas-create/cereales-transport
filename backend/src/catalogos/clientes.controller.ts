@@ -3,6 +3,8 @@ import { Response } from "express";
 import * as ExcelJS from "exceljs";
 import PDFDocument = require("pdfkit");
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
+import { RolesGuard } from "../auth/roles.guard";
+import { Roles } from "../auth/roles.decorator";
 import { PrismaService } from "../prisma/prisma.service";
 import { CreateClienteDto } from "./dto/create-cliente.dto";
 import { UpdateClienteDto } from "./dto/update-cliente.dto";
@@ -11,7 +13,7 @@ function fmtMoney(n: number) {
   return new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 0 }).format(n || 0);
 }
 
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
 @Controller("clientes")
 export class ClientesController {
   constructor(private prisma: PrismaService) {}
@@ -26,6 +28,7 @@ export class ClientesController {
     return this.prisma.cliente.findUnique({ where: { id }, include: { contactos: true } });
   }
 
+  @Roles("OPERACIONES", "FACTURACION", "ADMINISTRADOR")
   @Post()
   create(@Body() body: CreateClienteDto) {
     const { contactos, ...data } = body;
@@ -35,12 +38,14 @@ export class ClientesController {
     });
   }
 
+  @Roles("OPERACIONES", "FACTURACION", "ADMINISTRADOR")
   @Patch(":id")
   update(@Param("id") id: string, @Body() body: UpdateClienteDto) {
     const { contactos, ...data } = body;
     return this.prisma.cliente.update({ where: { id }, data });
   }
 
+  @Roles("OPERACIONES", "FACTURACION", "ADMINISTRADOR")
   @Delete(":id")
   remove(@Param("id") id: string) {
     return this.prisma.cliente.update({ where: { id }, data: { activo: false } });
