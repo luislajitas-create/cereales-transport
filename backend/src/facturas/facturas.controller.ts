@@ -263,6 +263,12 @@ export class FacturasController {
       throw new BadRequestException("Debe incluir al menos un viaje");
     }
 
+    const cliente = await this.prisma.cliente.findUnique({ where: { id: clienteId } });
+    if (!cliente) throw new NotFoundException("Cliente no encontrado.");
+    if (!cliente.activo) {
+      throw new BadRequestException("El cliente seleccionado está dado de baja. Reactívelo antes de crear la factura.");
+    }
+
     const viajes = await this.prisma.viaje.findMany({
       where: {
         id: { in: viajeIds },

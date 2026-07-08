@@ -134,6 +134,38 @@ export class ViajesController {
   @Roles("OPERACIONES", "ADMINISTRADOR")
   @Post()
   async create(@Body() body: CreateViajeDto, @CurrentUser() user: any) {
+    const cliente = await this.prisma.cliente.findUnique({ where: { id: body.clienteId } });
+    if (!cliente) throw new NotFoundException("Cliente no encontrado.");
+    if (!cliente.activo) {
+      throw new BadRequestException("El cliente seleccionado está dado de baja. Reactívelo antes de crear el viaje.");
+    }
+
+    const transportista = await this.prisma.transportista.findUnique({ where: { id: body.transportistaId } });
+    if (!transportista) throw new NotFoundException("Transportista no encontrado.");
+    if (!transportista.activo) {
+      throw new BadRequestException("El transportista seleccionado está dado de baja. Reactívelo antes de crear el viaje.");
+    }
+
+    const chofer = await this.prisma.chofer.findUnique({ where: { id: body.choferId } });
+    if (!chofer) throw new NotFoundException("Chofer no encontrado.");
+    if (!chofer.activo) {
+      throw new BadRequestException("El chofer seleccionado está dado de baja. Reactívelo antes de crear el viaje.");
+    }
+
+    const camion = await this.prisma.vehiculo.findUnique({ where: { id: body.camionId } });
+    if (!camion) throw new NotFoundException("Vehículo (camión) no encontrado.");
+    if (!camion.activo) {
+      throw new BadRequestException("El camión seleccionado está dado de baja. Reactívelo antes de crear el viaje.");
+    }
+
+    if (body.acopladoId) {
+      const acoplado = await this.prisma.vehiculo.findUnique({ where: { id: body.acopladoId } });
+      if (!acoplado) throw new NotFoundException("Vehículo (acoplado) no encontrado.");
+      if (!acoplado.activo) {
+        throw new BadRequestException("El acoplado seleccionado está dado de baja. Reactívelo antes de crear el viaje.");
+      }
+    }
+
     const importeTotal = Number(body.toneladas) * Number(body.tarifaTonelada);
     const viaje = await this.prisma.viaje.create({
       data: {

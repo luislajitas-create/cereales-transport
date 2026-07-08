@@ -207,6 +207,19 @@ export class AnticiposController {
     if (!body.choferId || !body.transportistaId || !body.tipoGastoId) {
       throw new BadRequestException("choferId, transportistaId y tipoGastoId son obligatorios");
     }
+
+    const chofer = await this.prisma.chofer.findUnique({ where: { id: body.choferId } });
+    if (!chofer) throw new NotFoundException("Chofer no encontrado.");
+    if (!chofer.activo) {
+      throw new BadRequestException("El chofer seleccionado está dado de baja. Reactívelo antes de crear el anticipo/gasto.");
+    }
+
+    const transportista = await this.prisma.transportista.findUnique({ where: { id: body.transportistaId } });
+    if (!transportista) throw new NotFoundException("Transportista no encontrado.");
+    if (!transportista.activo) {
+      throw new BadRequestException("El transportista seleccionado está dado de baja. Reactívelo antes de crear el anticipo/gasto.");
+    }
+
     return this.prisma.anticipoGasto.create({
       data: {
         viajeId: body.viajeId || null,

@@ -329,10 +329,21 @@ export class LiquidacionesController {
       throw new BadRequestException("Debe incluir al menos un viaje");
     }
 
-    let chofer: { id: string; comisionPct: number } | null = null;
+    let chofer: { id: string; comisionPct: number; activo: boolean } | null = null;
     if (tipo === "CHOFER") {
       chofer = await this.prisma.chofer.findUnique({ where: { id: choferId } });
-      if (!chofer) throw new NotFoundException("Chofer no encontrado");
+      if (!chofer) throw new NotFoundException("Chofer no encontrado.");
+      if (!chofer.activo) {
+        throw new BadRequestException("El chofer seleccionado está dado de baja. Reactívelo antes de crear la liquidación.");
+      }
+    }
+
+    if (tipo === "TRANSPORTISTA") {
+      const transportista = await this.prisma.transportista.findUnique({ where: { id: transportistaId } });
+      if (!transportista) throw new NotFoundException("Transportista no encontrado.");
+      if (!transportista.activo) {
+        throw new BadRequestException("El transportista seleccionado está dado de baja. Reactívelo antes de crear la liquidación.");
+      }
     }
 
     const pctChoferDefault = chofer?.comisionPct ?? 0;
