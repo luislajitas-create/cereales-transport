@@ -1,4 +1,4 @@
-import { IsDateString, IsNumber, IsOptional, IsString } from "class-validator";
+import { IsBoolean, IsDateString, IsNumber, IsOptional, IsString } from "class-validator";
 import { Type } from "class-transformer";
 
 export class UpdateChoferDto {
@@ -34,4 +34,8 @@ export class UpdateChoferDto {
   @IsOptional()
   @IsString()
   telefono?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  activo?: boolean;
 }

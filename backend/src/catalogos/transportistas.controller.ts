@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Res, UseGuards } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Res, UseGuards } from "@nestjs/common";
 import { Response } from "express";
 import * as ExcelJS from "exceljs";
 import PDFDocument = require("pdfkit");
@@ -15,8 +15,9 @@ export class TransportistasController {
   constructor(private prisma: PrismaService) {}
 
   @Get()
-  findAll() {
+  findAll(@Query("incluirInactivos") incluirInactivos?: string) {
     return this.prisma.transportista.findMany({
+      where: incluirInactivos === "true" ? undefined : { activo: true },
       include: { choferes: true, vehiculos: true },
       orderBy: { razonSocial: "asc" },
     });

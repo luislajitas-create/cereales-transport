@@ -144,6 +144,7 @@ model Chofer {
   licenciaNumero      String?
   licenciaVencimiento DateTime?
   telefono            String?
+  activo              Boolean  @default(true)
 
   transportista Transportista @relation(fields: [transportistaId], references: [id])
   viajes        Viaje[]
@@ -161,6 +162,7 @@ model Vehiculo {
   capacidadKg        Float?
   vencimientoRto     DateTime?
   vencimientoSeguro  DateTime?
+  activo             Boolean      @default(true)
 
   transportista     Transportista @relation(fields: [transportistaId], references: [id])
   viajesComoCamion  Viaje[]       @relation("ViajeCamion")

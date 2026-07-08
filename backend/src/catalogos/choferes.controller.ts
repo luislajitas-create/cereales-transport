@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post, Query, Res, UseGuards } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Res, UseGuards } from "@nestjs/common";
 import { Response } from "express";
 import * as ExcelJS from "exceljs";
 import PDFDocument = require("pdfkit");
@@ -15,11 +15,14 @@ export class ChoferesController {
   constructor(private prisma: PrismaService) {}
 
   @Get()
-  findAll(@Query("transportistaId") transportistaId?: string) {
-    return this.prisma.chofer.findMany({
-      where: transportistaId ? { transportistaId } : undefined,
-      orderBy: { nombre: "asc" },
-    });
+  findAll(
+    @Query("transportistaId") transportistaId?: string,
+    @Query("incluirInactivos") incluirInactivos?: string,
+  ) {
+    const where: any = {};
+    if (transportistaId) where.transportistaId = transportistaId;
+    if (incluirInactivos !== "true") where.activo = true;
+    return this.prisma.chofer.findMany({ where, orderBy: { nombre: "asc" } });
   }
 
   @Get(":id")
@@ -37,6 +40,12 @@ export class ChoferesController {
   @Patch(":id")
   update(@Param("id") id: string, @Body() body: UpdateChoferDto) {
     return this.prisma.chofer.update({ where: { id }, data: body });
+  }
+
+  @Roles("OPERACIONES", "LIQUIDACIONES", "ADMINISTRADOR")
+  @Delete(":id")
+  remove(@Param("id") id: string) {
+    return this.prisma.chofer.update({ where: { id }, data: { activo: false } });
   }
 
   @Get("export/excel")

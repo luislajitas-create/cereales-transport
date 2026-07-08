@@ -1,4 +1,4 @@
-import { IsDateString, IsEnum, IsNumber, IsOptional, IsString } from "class-validator";
+import { IsBoolean, IsDateString, IsEnum, IsNumber, IsOptional, IsString } from "class-validator";
 import { Type } from "class-transformer";
 import { TipoVehiculo } from "@prisma/client";
 
@@ -35,4 +35,8 @@ export class UpdateVehiculoDto {
   @IsOptional()
   @IsDateString()
   vencimientoSeguro?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  activo?: boolean;
 }
