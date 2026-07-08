@@ -1,15 +1,18 @@
 import { useEffect, useState } from "react";
 import { api } from "../api/client";
+import { useConfirm } from "../components/ConfirmDialog";
+import { useAsyncAction } from "../hooks/useAsyncAction";
 
 function fmtMoney(n: number) {
   return new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 0 }).format(n || 0);
 }
 
 export default function Liquidaciones() {
+  const confirm = useConfirm();
+  const { busy, error, success, setError, run } = useAsyncAction();
   const [liquidaciones, setLiquidaciones] = useState<any[]>([]);
   const [transportistas, setTransportistas] = useState<any[]>([]);
   const [choferes, setChoferes] = useState<any[]>([]);
-  const [error, setError] = useState("");
   const [detalle, setDetalle] = useState<any>(null);
   const [descargando, setDescargando] = useState<string>("");
 
@@ -54,21 +57,25 @@ export default function Liquidaciones() {
     setSet(next);
   }
 
-  async function crearLiquidacion() {
-    setError("");
-    try {
-      const { data } = await api.post("/liquidaciones", {
-        ...form,
-        comisionPct: Number(form.comisionPct),
-        viajeIds: Array.from(viajesSel),
-        anticipoIds: Array.from(anticiposSel),
-      });
-      setCandidatos(null);
-      cargar();
-      verDetalle(data.id);
-    } catch (err: any) {
-      setError(err?.response?.data?.message || "No se pudo crear la liquidación");
-    }
+  function crearLiquidacion() {
+    run(
+      async () => {
+        const { data } = await api.post("/liquidaciones", {
+          ...form,
+          comisionPct: Number(form.comisionPct),
+          viajeIds: Array.from(viajesSel),
+          anticipoIds: Array.from(anticiposSel),
+        });
+        setCandidatos(null);
+        cargar();
+        await verDetalle(data.id);
+        return data;
+      },
+      {
+        successMessage: (data: any) => `Liquidación N° ${data.numero} creada en borrador.`,
+        errorMessage: "No se pudo crear la liquidación",
+      },
+    );
   }
 
   async function verDetalle(id: string) {
@@ -76,15 +83,72 @@ export default function Liquidaciones() {
     setDetalle(data);
   }
 
-  async function accion(id: string, path: string) {
-    setError("");
-    try {
-      await api.post(`/liquidaciones/${id}/${path}`, {});
-      cargar();
-      verDetalle(id);
-    } catch (err: any) {
-      setError(err?.response?.data?.message || "No se pudo completar la acción");
-    }
+  async function confirmarLiquidacion() {
+    if (!detalle) return;
+    const ok = await confirm({
+      title: "Confirmar liquidación",
+      message: `¿Confirmar la liquidación N° ${detalle.numero}? Podrá marcarse como pagada una vez confirmada.`,
+      confirmLabel: "Confirmar liquidación",
+    });
+    if (!ok.confirmed) return;
+    run(
+      async () => {
+        await api.post(`/liquidaciones/${detalle.id}/confirmar`, {});
+        cargar();
+        await verDetalle(detalle.id);
+      },
+      {
+        successMessage: `Liquidación N° ${detalle.numero} confirmada.`,
+        errorMessage: "No se pudo confirmar la liquidación.",
+      },
+    );
+  }
+
+  async function pagarLiquidacion() {
+    if (!detalle) return;
+    const contraparte = detalle.transportista?.razonSocial || detalle.chofer?.nombre || "-";
+    const ok = await confirm({
+      title: "Marcar como pagada",
+      message: `¿Marcar como pagada la liquidación N° ${detalle.numero} por ${fmtMoney(detalle.netoPagar)} a ${contraparte}? Esta acción no se puede deshacer.`,
+      severity: "high",
+      requireTypedValue: String(detalle.numero),
+      typedValueLabel: `Escribí "${detalle.numero}" para confirmar`,
+      confirmLabel: "Marcar como pagada",
+    });
+    if (!ok.confirmed) return;
+    run(
+      async () => {
+        await api.post(`/liquidaciones/${detalle.id}/pagar`, {});
+        cargar();
+        await verDetalle(detalle.id);
+      },
+      {
+        successMessage: `Liquidación N° ${detalle.numero} pagada — ${fmtMoney(detalle.netoPagar)}.`,
+        errorMessage: "No se pudo marcar la liquidación como pagada.",
+      },
+    );
+  }
+
+  async function anularLiquidacion() {
+    if (!detalle) return;
+    const efectoAnticipos = detalle.movimientos.length > 0 ? ` y ${detalle.movimientos.length} anticipo(s)/gasto(s) a no liquidado` : "";
+    const ok = await confirm({
+      title: "Anular liquidación",
+      message: `¿Anular la liquidación N° ${detalle.numero}? Se revertirán ${detalle.viajes.length} viaje(s) a pendiente de liquidar${efectoAnticipos}.`,
+      confirmLabel: "Anular liquidación",
+    });
+    if (!ok.confirmed) return;
+    run(
+      async () => {
+        await api.post(`/liquidaciones/${detalle.id}/anular`, {});
+        cargar();
+        await verDetalle(detalle.id);
+      },
+      {
+        successMessage: `Liquidación N° ${detalle.numero} anulada.`,
+        errorMessage: "No se pudo anular la liquidación.",
+      },
+    );
   }
 
   async function descargar(id: string, numero: string | number, tipo: "excel" | "pdf") {
@@ -115,6 +179,7 @@ export default function Liquidaciones() {
     <div>
       <div className="page-header"><h1>Liquidaciones</h1></div>
       {error && <div className="error-banner">{error}</div>}
+      {success && <div className="success-banner">{success}</div>}
 
       <div className="card">
         <div className="section-title">Nueva liquidación</div>
@@ -213,7 +278,9 @@ export default function Liquidaciones() {
               Comisión: {form.comisionPct}%
             </p>
             <div className="actions-row">
-              <button className="btn" disabled={viajesSel.size === 0} onClick={crearLiquidacion}>Crear liquidación (borrador)</button>
+              <button className="btn" disabled={viajesSel.size === 0 || busy} onClick={crearLiquidacion}>
+                {busy ? "Creando..." : "Crear liquidación (borrador)"}
+              </button>
             </div>
           </>
         )}
@@ -242,7 +309,7 @@ export default function Liquidaciones() {
       {detalle && (
         <div className="card">
           <div className="page-header">
-            <h1>Liquidación N° {detalle.numerl}</h1>
+            <h1>Liquidación N° {detalle.numero}</h1>
             <span className={`badge ${detalle.estado}`}>{detalle.estado}</span>
           </div>
           <p>
@@ -282,9 +349,9 @@ export default function Liquidaciones() {
             <button className="btn secondary" disabled={descargando === `${detalle.id}-pdf`} onClick={() => descargar(detalle.id, detalle.numero, "pdf")}>
               {descargando === `${detalle.id}-pdf` ? "Descargando..." : "Descargar PDF"}
             </button>
-            {detalle.estado === "BORRADOR" && <button className="btn success" onClick={() => accion(detalle.id, "confirmar")}>Confirmar</button>}
-            {detalle.estado === "CONFIRMADA" && <button className="btn success" onClick={() => accion(detalle.id, "pagar")}>Marcar como pagada</button>}
-            {detalle.estado !== "PAGADA" && <button className="btn danger" onClick={() => accion(detalle.id, "anular")}>Anular</button>}
+            {detalle.estado === "BORRADOR" && <button className="btn success" disabled={busy} onClick={confirmarLiquidacion}>Confirmar</button>}
+            {detalle.estado === "CONFIRMADA" && <button className="btn success" disabled={busy} onClick={pagarLiquidacion}>Marcar como pagada</button>}
+            {detalle.estado !== "PAGADA" && <button className="btn danger" disabled={busy} onClick={anularLiquidacion}>Anular</button>}
           </div>
         </div>
       )}

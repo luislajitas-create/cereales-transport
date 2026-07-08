@@ -1,16 +1,19 @@
 import { useEffect, useState } from "react";
 import { api } from "../api/client";
+import { useConfirm } from "../components/ConfirmDialog";
+import { useAsyncAction } from "../hooks/useAsyncAction";
 
 function fmtMoney(n: number) {
   return new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 0 }).format(n || 0);
 }
 
 export default function Anticipos() {
+  const confirm = useConfirm();
+  const { busy, error, success, run } = useAsyncAction();
   const [anticipos, setAnticipos] = useState<any[]>([]);
   const [transportistas, setTransportistas] = useState<any[]>([]);
   const [choferes, setChoferes] = useState<any[]>([]);
   const [tiposGasto, setTiposGasto] = useState<any[]>([]);
-  const [error, setError] = useState("");
   const [nuevo, setNuevo] = useState({
     transportistaId: "", choferId: "", tipoGastoId: "", fecha: new Date().toISOString().slice(0, 10), importe: "", observaciones: "",
   });
@@ -30,33 +33,47 @@ export default function Anticipos() {
     api.get("/choferes", { params: { transportistaId: nuevo.transportistaId } }).then((res) => setChoferes(res.data));
   }, [nuevo.transportistaId]);
 
-  async function crear(e: React.FormEvent) {
+  function crear(e: React.FormEvent) {
     e.preventDefault();
-    setError("");
-    try {
-      await api.post("/anticipos", { ...nuevo, importe: Number(nuevo.importe) });
-      setNuevo({ ...nuevo, tipoGastoId: "", importe: "", observaciones: "" });
-      cargar();
-    } catch (err: any) {
-      setError(err?.response?.data?.message || "No se pudo registrar el anticipo/gasto");
-    }
+    const importeNuevo = Number(nuevo.importe) || 0;
+    run(
+      async () => {
+        await api.post("/anticipos", { ...nuevo, importe: importeNuevo });
+        setNuevo({ ...nuevo, tipoGastoId: "", importe: "", observaciones: "" });
+        cargar();
+      },
+      {
+        successMessage: `Anticipo/gasto registrado por ${fmtMoney(importeNuevo)}.`,
+        errorMessage: "No se pudo registrar el anticipo/gasto",
+      },
+    );
   }
 
-  async function anular(id: string) {
-    const motivo = window.prompt("Motivo de anulación:");
-    if (!motivo) return;
-    try {
-      await api.post(`/anticipos/${id}/anular`, { motivo });
-      cargar();
-    } catch (err: any) {
-      setError(err?.response?.data?.message || "No se pudo anular");
-    }
+  async function anular(a: any) {
+    const ok = await confirm({
+      title: "Anular anticipo/gasto",
+      message: `¿Anular el anticipo/gasto de ${fmtMoney(a.importe)} (${a.tipoGasto?.nombre}) del ${new Date(a.fecha).toLocaleDateString()}?`,
+      requireMotivo: true,
+      confirmLabel: "Anular",
+    });
+    if (!ok.confirmed) return;
+    run(
+      async () => {
+        await api.post(`/anticipos/${a.id}/anular`, { motivo: ok.motivo });
+        cargar();
+      },
+      {
+        successMessage: "Anticipo/gasto anulado.",
+        errorMessage: "No se pudo anular el anticipo/gasto",
+      },
+    );
   }
 
   return (
     <div>
       <div className="page-header"><h1>Anticipos y Gastos</h1></div>
       {error && <div className="error-banner">{error}</div>}
+      {success && <div className="success-banner">{success}</div>}
 
       <form className="card" onSubmit={crear}>
         <div className="section-title">Registrar anticipo / gasto</div>
@@ -95,7 +112,9 @@ export default function Anticipos() {
             <input value={nuevo.observaciones} onChange={(e) => setNuevo({ ...nuevo, observaciones: e.target.value })} />
           </div>
         </div>
-        <div className="actions-row"><button className="btn" type="submit">Registrar</button></div>
+        <div className="actions-row">
+          <button className="btn" type="submit" disabled={busy}>{busy ? "Registrando..." : "Registrar"}</button>
+        </div>
       </form>
 
       <table>
@@ -114,7 +133,7 @@ export default function Anticipos() {
               <td>{a.anulado ? `Sí (${a.anuladoMotivo})` : "No"}</td>
               <td>
                 {!a.liquidado && !a.anulado && (
-                  <button className="btn danger" onClick={() => anular(a.id)}>Anular</button>
+                  <button className="btn danger" disabled={busy} onClick={() => anular(a)}>Anular</button>
                 )}
               </td>
             </tr>

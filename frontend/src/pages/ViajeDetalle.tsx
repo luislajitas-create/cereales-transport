@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import { api } from "../api/client";
+import { useConfirm } from "../components/ConfirmDialog";
 
 const ORDEN_ESTADOS = ["PENDIENTE", "ASIGNADO", "EN_CARGA", "CARGADO", "EN_TRANSITO", "DESCARGADO"];
 
@@ -10,8 +11,10 @@ function fmtMoney(n: number) {
 
 export default function ViajeDetalle() {
   const { id } = useParams();
+  const confirm = useConfirm();
   const [viaje, setViaje] = useState<any>(null);
   const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
   const [busy, setBusy] = useState(false);
 
   function cargar() {
@@ -38,12 +41,20 @@ export default function ViajeDetalle() {
   }
 
   async function cancelarViaje() {
-    const motivo = window.prompt("Motivo de cancelación:");
-    if (!motivo) return;
+    if (!viaje) return;
+    const ok = await confirm({
+      title: "Cancelar viaje",
+      message: `¿Cancelar el viaje N° ${viaje.numeroViaje}?`,
+      requireMotivo: true,
+      confirmLabel: "Cancelar viaje",
+    });
+    if (!ok.confirmed) return;
     setBusy(true);
     setError("");
+    setSuccess("");
     try {
-      await api.post(`/viajes/${id}/cancelar`, { motivo });
+      await api.post(`/viajes/${id}/cancelar`, { motivo: ok.motivo });
+      setSuccess(`Viaje N° ${viaje.numeroViaje} cancelado.`);
       cargar();
     } catch (err: any) {
       setError(err?.response?.data?.message || "No se pudo cancelar el viaje");
@@ -65,6 +76,7 @@ export default function ViajeDetalle() {
         <span className={`badge ${viaje.estado}`}>{viaje.estado}</span>
       </div>
       {error && <div className="error-banner">{error}</div>}
+      {success && <div className="success-banner">{success}</div>}
 
       <div className="card">
         <div className="form-grid">

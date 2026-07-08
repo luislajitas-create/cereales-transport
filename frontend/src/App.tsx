@@ -1,4 +1,5 @@
 import { Routes, Route } from "react-router-dom";
+import { ConfirmProvider } from "./components/ConfirmDialog";
 import Layout from "./components/Layout";
 import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
@@ -15,21 +16,23 @@ import Conciliacion from "./pages/Conciliacion";
 
 export default function App() {
   return (
-    <Routes>
-      <Route path="/login" element={<Login />} />
-      <Route element={<Layout />}>
-        <Route path="/" element={<Dashboard />} />
-        <Route path="/viajes" element={<Viajes />} />
-        <Route path="/viajes/nuevo" element={<ViajeForm />} />
-        <Route path="/viajes/:id" element={<ViajeDetalle />} />
-        <Route path="/clientes" element={<Clientes />} />
-        <Route path="/transportistas" element={<Transportistas />} />
-        <Route path="/catalogos" element={<Catalogos />} />
-        <Route path="/anticipos" element={<Anticipos />} />
-        <Route path="/liquidaciones" element={<Liquidaciones />} />
-        <Route path="/facturas" element={<Facturas />} />
-        <Route path="/facturas/conciliacion" element={<Conciliacion />} />
-      </Route>
-    </Routes>
+    <ConfirmProvider>
+      <Routes>
+        <Route path="/login" element={<Login />} />
+        <Route element={<Layout />}>
+          <Route path="/" element={<Dashboard />} />
+          <Route path="/viajes" element={<Viajes />} />
+          <Route path="/viajes/nuevo" element={<ViajeForm />} />
+          <Route path="/viajes/:id" element={<ViajeDetalle />} />
+          <Route path="/clientes" element={<Clientes />} />
+          <Route path="/transportistas" element={<Transportistas />} />
+          <Route path="/catalogos" element={<Catalogos />} />
+          <Route path="/anticipos" element={<Anticipos />} />
+          <Route path="/liquidaciones" element={<Liquidaciones />} />
+          <Route path="/facturas" element={<Facturas />} />
+          <Route path="/facturas/conciliacion" element={<Conciliacion />} />
+        </Route>
+      </Routes>
+    </ConfirmProvider>
   );
 }

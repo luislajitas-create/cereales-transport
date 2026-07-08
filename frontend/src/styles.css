@@ -96,6 +96,21 @@ tbody tr:hover { background: #f0f4f7; }
 
 .error-banner { background: #fdecea; color: var(--danger); padding: 0.7rem 1rem; border-radius: 4px; margin-bottom: 1rem; font-size: 0.85rem; }
 .success-banner { background: #e6f4ea; color: var(--success); padding: 0.7rem 1rem; border-radius: 4px; margin-bottom: 1rem; font-size: 0.85rem; }
+
+.confirm-overlay {
+  position: fixed; inset: 0; background: rgba(20, 30, 38, 0.45);
+  display: flex; align-items: center; justify-content: center; z-index: 1000;
+}
+.confirm-dialog {
+  background: white; border-radius: 8px; padding: 1.4rem 1.6rem; width: 420px; max-width: 90vw;
+  box-shadow: 0 12px 40px rgba(0,0,0,0.25);
+}
+.confirm-dialog.high { border-top: 4px solid var(--danger); }
+.confirm-dialog h2 { margin: 0 0 0.6rem; font-size: 1.1rem; color: var(--primary); }
+.confirm-dialog p { margin: 0 0 0.8rem; font-size: 0.88rem; line-height: 1.4; }
+.confirm-dialog .field { margin-bottom: 0.8rem; }
+.confirm-dialog textarea, .confirm-dialog input { width: 100%; padding: 0.5rem; border: 1px solid var(--border); border-radius: 4px; font-size: 0.85rem; }
+.confirm-dialog .actions-row { margin-top: 0.4rem; justify-content: flex-end; }
 .muted { color: #888; font-size: 0.82rem; }
 .section-title { font-size: 1.05rem; color: var(--primary); margin: 1.2rem 0 0.6rem; }
 .checkbox-row { display: flex; align-items: center; gap: 0.5rem; }

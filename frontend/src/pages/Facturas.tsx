@@ -1,15 +1,18 @@
 import { useEffect, useState } from "react";
 import { api } from "../api/client";
+import { useConfirm } from "../components/ConfirmDialog";
+import { useAsyncAction } from "../hooks/useAsyncAction";
 
 function fmtMoney(n: number) {
   return new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 0 }).format(n || 0);
 }
 
 export default function Facturas() {
+  const confirm = useConfirm();
+  const { busy, error, success, run } = useAsyncAction();
   const [facturas, setFacturas] = useState<any[]>([]);
   const [clientes, setClientes] = useState<any[]>([]);
   const [pendientes, setPendientes] = useState<any[]>([]);
-  const [error, setError] = useState("");
   const [detalle, setDetalle] = useState<any>(null);
   const [cobranza, setCobranza] = useState({ fecha: new Date().toISOString().slice(0, 10), importe: "", medioPago: "" });
 
@@ -37,17 +40,21 @@ export default function Facturas() {
     setViajesSel(next);
   }
 
-  async function crearFactura() {
-    setError("");
-    try {
-      await api.post("/facturas", { ...form, viajeIds: Array.from(viajesSel) });
-      setPendientes([]);
-      setViajesSel(new Set());
-      setForm({ ...form, numero: "", vencimiento: "" });
-      cargar();
-    } catch (err: any) {
-      setError(err?.response?.data?.message || "No se pudo crear la factura");
-    }
+  function crearFactura() {
+    run(
+      async () => {
+        const { data } = await api.post("/facturas", { ...form, viajeIds: Array.from(viajesSel) });
+        setPendientes([]);
+        setViajesSel(new Set());
+        setForm({ ...form, numero: "", vencimiento: "" });
+        cargar();
+        return data;
+      },
+      {
+        successMessage: (data: any) => `Factura ${data.numero} creada por ${fmtMoney(data.importe)}.`,
+        errorMessage: "No se pudo crear la factura",
+      },
+    );
   }
 
   async function verDetalle(id: string) {
@@ -57,26 +64,47 @@ export default function Facturas() {
 
   async function registrarCobranza() {
     if (!detalle) return;
-    setError("");
-    try {
-      await api.post(`/facturas/${detalle.id}/cobranzas`, { ...cobranza, importe: Number(cobranza.importe) });
-      setCobranza({ fecha: new Date().toISOString().slice(0, 10), importe: "", medioPago: "" });
-      verDetalle(detalle.id);
-      cargar();
-    } catch (err: any) {
-      setError(err?.response?.data?.message || "No se pudo registrar la cobranza");
-    }
+    const importeCobranza = Number(cobranza.importe) || 0;
+    const ok = await confirm({
+      title: "Registrar cobranza",
+      message: `¿Registrar una cobranza de ${fmtMoney(importeCobranza)}${cobranza.medioPago ? ` por ${cobranza.medioPago}` : ""} para la factura ${detalle.numero}?`,
+      confirmLabel: "Registrar cobranza",
+    });
+    if (!ok.confirmed) return;
+    run(
+      async () => {
+        await api.post(`/facturas/${detalle.id}/cobranzas`, { ...cobranza, importe: importeCobranza });
+        setCobranza({ fecha: new Date().toISOString().slice(0, 10), importe: "", medioPago: "" });
+        await verDetalle(detalle.id);
+        cargar();
+      },
+      {
+        successMessage: `Cobranza registrada por ${fmtMoney(importeCobranza)}.`,
+        errorMessage: "No se pudo registrar la cobranza",
+      },
+    );
   }
 
   async function anularFactura(id: string) {
-    setError("");
-    try {
-      await api.post(`/facturas/${id}/anular`, {});
-      cargar();
-      setDetalle(null);
-    } catch (err: any) {
-      setError(err?.response?.data?.message || "No se pudo anular la factura");
-    }
+    if (!detalle) return;
+    const ok = await confirm({
+      title: "Anular factura",
+      message: `¿Anular la factura ${detalle.numero} por ${fmtMoney(detalle.importe)}? Se revertirán ${detalle.viajes.length} viaje(s) a pendiente de facturar.`,
+      confirmLabel: "Anular factura",
+    });
+    if (!ok.confirmed) return;
+    const numeroAnulada = detalle.numero;
+    run(
+      async () => {
+        await api.post(`/facturas/${id}/anular`, {});
+        cargar();
+        setDetalle(null);
+      },
+      {
+        successMessage: `Factura ${numeroAnulada} anulada.`,
+        errorMessage: "No se pudo anular la factura",
+      },
+    );
   }
 
   const totalSel = pendientes.filter((v) => viajesSel.has(v.id)).reduce((acc, v) => acc + v.importeTotal, 0);
@@ -85,6 +113,7 @@ export default function Facturas() {
     <div>
       <div className="page-header"><h1>Facturación</h1></div>
       {error && <div className="error-banner">{error}</div>}
+      {success && <div className="success-banner">{success}</div>}
 
       <div className="card">
         <div className="section-title">Nueva factura</div>
@@ -131,8 +160,8 @@ export default function Facturas() {
             </table>
             <p className="muted">Total seleccionado: {fmtMoney(totalSel)}</p>
             <div className="actions-row">
-              <button className="btn" disabled={viajesSel.size === 0 || !form.numero || !form.vencimiento} onClick={crearFactura}>
-                Crear factura
+              <button className="btn" disabled={viajesSel.size === 0 || !form.numero || !form.vencimiento || busy} onClick={crearFactura}>
+                {busy ? "Creando..." : "Crear factura"}
               </button>
             </div>
           </>
@@ -189,12 +218,12 @@ export default function Facturas() {
               <input type="date" value={cobranza.fecha} onChange={(e) => setCobranza({ ...cobranza, fecha: e.target.value })} />
               <input type="number" placeholder="Importe" value={cobranza.importe} onChange={(e) => setCobranza({ ...cobranza, importe: e.target.value })} />
               <input placeholder="Medio de pago" value={cobranza.medioPago} onChange={(e) => setCobranza({ ...cobranza, medioPago: e.target.value })} />
-              <button className="btn" onClick={registrarCobranza}>Registrar cobranza</button>
+              <button className="btn" disabled={busy} onClick={registrarCobranza}>Registrar cobranza</button>
             </div>
           )}
 
           {detalle.cobranzas.length === 0 && detalle.estado !== "ANULADO" && (
-            <div className="actions-row"><button className="btn danger" onClick={() => anularFactura(detalle.id)}>Anular factura</button></div>
+            <div className="actions-row"><button className="btn danger" disabled={busy} onClick={() => anularFactura(detalle.id)}>Anular factura</button></div>
           )}
         </div>
       )}
