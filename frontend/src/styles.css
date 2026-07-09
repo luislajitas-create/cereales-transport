@@ -67,6 +67,7 @@ table { width: 100%; border-collapse: collapse; background: white; border-radius
 thead th { background: var(--primary); color: white; text-align: left; padding: 0.6rem 0.8rem; font-size: 0.8rem; }
 tbody td { padding: 0.55rem 0.8rem; border-bottom: 1px solid var(--border); font-size: 0.85rem; }
 tbody tr:hover { background: #f0f4f7; }
+.num { text-align: right; }
 
 .filters { display: flex; gap: 0.6rem; margin-bottom: 1rem; flex-wrap: wrap; align-items: end; }
 .filters .field { display: flex; flex-direction: column; font-size: 0.75rem; color: #555; }

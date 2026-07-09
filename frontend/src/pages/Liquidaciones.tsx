@@ -3,6 +3,8 @@ import { api } from "../api/client";
 import { useConfirm } from "../components/ConfirmDialog";
 import { useAsyncAction } from "../hooks/useAsyncAction";
 
+const CATEGORIAS_ADELANTO = ["Seguros", "Transferencia Bancaria", "Efectivo", "Combustible", "Otros"];
+
 function fmtMoney(n: number) {
   return new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 0 }).format(n || 0);
 }
@@ -15,6 +17,7 @@ export default function Liquidaciones() {
   const [choferes, setChoferes] = useState<any[]>([]);
   const [detalle, setDetalle] = useState<any>(null);
   const [descargando, setDescargando] = useState<string>("");
+  const [detalleTecnicoAbierto, setDetalleTecnicoAbierto] = useState(false);
 
   const [form, setForm] = useState({
     tipo: "TRANSPORTISTA", transportistaId: "", choferId: "", periodoDesde: "", periodoHasta: "", comisionPct: "0",
@@ -81,6 +84,7 @@ export default function Liquidaciones() {
   async function verDetalle(id: string) {
     const { data } = await api.get(`/liquidaciones/${id}`);
     setDetalle(data);
+    setDetalleTecnicoAbierto(false);
   }
 
   async function confirmarLiquidacion() {
@@ -239,7 +243,7 @@ export default function Liquidaciones() {
           <>
             <div className="section-title">Viajes pendientes de liquidar ({candidatos.viajes.length})</div>
             <table>
-              <thead><tr><th></th><th>N°</th><th>Fecha</th><th>CTG</th><th>Cereal</th><th>Tn</th><th>Importe</th></tr></thead>
+              <thead><tr><th></th><th>N°</th><th>Fecha</th><th>CTG</th><th>Cereal</th><th className="num">Tn</th><th className="num">Importe</th></tr></thead>
               <tbody>
                 {candidatos.viajes.map((v) => (
                   <tr key={v.id}>
@@ -248,8 +252,8 @@ export default function Liquidaciones() {
                     <td>{new Date(v.fecha).toLocaleDateString()}</td>
                     <td>{v.ctg}</td>
                     <td>{v.cereal?.nombre}</td>
-                    <td>{v.toneladas}</td>
-                    <td>{fmtMoney(v.importeTotal)}</td>
+                    <td className="num">{v.toneladas}</td>
+                    <td className="num">{fmtMoney(v.importeTotal)}</td>
                   </tr>
                 ))}
                 {candidatos.viajes.length === 0 && <tr><td colSpan={7} className="muted">Sin viajes pendientes en el período.</td></tr>}
@@ -258,14 +262,14 @@ export default function Liquidaciones() {
 
             <div className="section-title">Anticipos / gastos pendientes ({candidatos.anticipos.length})</div>
             <table>
-              <thead><tr><th></th><th>Fecha</th><th>Tipo</th><th>Importe</th><th>Observación</th></tr></thead>
+              <thead><tr><th></th><th>Fecha</th><th>Tipo</th><th className="num">Importe</th><th>Observación</th></tr></thead>
               <tbody>
                 {candidatos.anticipos.map((a) => (
                   <tr key={a.id}>
                     <td><input type="checkbox" checked={anticiposSel.has(a.id)} onChange={() => toggle(anticiposSel, setAnticiposSel, a.id)} /></td>
                     <td>{new Date(a.fecha).toLocaleDateString()}</td>
                     <td>{a.tipoGasto?.nombre}</td>
-                    <td>{fmtMoney(a.importe)}</td>
+                    <td className="num">{fmtMoney(a.importe)}</td>
                     <td>{a.observaciones || "—"}</td>
                   </tr>
                 ))}
@@ -289,7 +293,7 @@ export default function Liquidaciones() {
       <div className="card">
         <div className="section-title">Liquidaciones</div>
         <table>
-          <thead><tr><th>N°</th><th>Tipo</th><th>Transportista / Chofer</th><th>Período</th><th>Neto a pagar</th><th>Estado</th><th></th></tr></thead>
+          <thead><tr><th>N°</th><th>Tipo</th><th>Transportista / Chofer</th><th>Período</th><th className="num">Neto a pagar</th><th>Estado</th><th></th></tr></thead>
           <tbody>
             {liquidaciones.map((l) => (
               <tr key={l.id}>
@@ -297,7 +301,7 @@ export default function Liquidaciones() {
                 <td>{l.tipo}</td>
                 <td>{l.transportista?.razonSocial || l.chofer?.nombre}</td>
                 <td>{new Date(l.periodoDesde).toLocaleDateString()} - {new Date(l.periodoHasta).toLocaleDateString()}</td>
-                <td>{fmtMoney(l.netoPagar)}</td>
+                <td className="num">{fmtMoney(l.netoPagar)}</td>
                 <td><span className={`badge ${l.estado}`}>{l.estado}</span></td>
                 <td><button className="btn secondary" onClick={() => verDetalle(l.id)}>Ver</button></td>
               </tr>
@@ -312,35 +316,168 @@ export default function Liquidaciones() {
             <h1>Liquidación N° {detalle.numero}</h1>
             <span className={`badge ${detalle.estado}`}>{detalle.estado}</span>
           </div>
-          <p>
-            <strong>Total bruto:</strong> {fmtMoney(detalle.totalBruto)} · <strong>Anticipos:</strong> {fmtMoney(detalle.totalAnticipos)} ·{" "}
-            <strong>Descuentos:</strong> {fmtMoney(detalle.totalDescuentos)} · <strong>Neto a pagar:</strong> {fmtMoney(detalle.netoPagar)}
-          </p>
+          <div className="kpi-grid">
+            <div className="kpi-card">
+              <div className="label">{detalle.tipo === "CHOFER" ? "Chofer" : "Transportista"}</div>
+              <div className="value" style={{ fontSize: "1.15rem" }}>
+                {detalle.tipo === "CHOFER" ? detalle.chofer?.nombre : detalle.transportista?.razonSocial}
+              </div>
+            </div>
+            <div className="kpi-card">
+              <div className="label">{detalle.tipo === "CHOFER" ? "CUIL" : "CUIT"}</div>
+              <div className="value" style={{ fontSize: "1.15rem" }}>
+                {(detalle.tipo === "CHOFER" ? detalle.chofer?.cuil : detalle.transportista?.cuit) || "—"}
+              </div>
+            </div>
+            <div className="kpi-card">
+              <div className="label">Período</div>
+              <div className="value">
+                {new Date(detalle.periodoDesde).toLocaleDateString()} → {new Date(detalle.periodoHasta).toLocaleDateString()}
+              </div>
+              <div className="sub">
+                {detalle.planilla.filas.length} viajes • {detalle.planilla.totales.toneladas.toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} toneladas
+              </div>
+            </div>
+            <div className="kpi-card">
+              <div className="label">Importe bruto</div>
+              <div className="value">{fmtMoney(detalle.planilla.totales.subtotal)}</div>
+            </div>
+            <div className="kpi-card">
+              <div className="label">Total descuentos</div>
+              <div className="value">{fmtMoney(detalle.planilla.totales.comisionMonto + detalle.planilla.totales.totalAdelantos)}</div>
+            </div>
+            <div className="kpi-card">
+              <div className="label">Neto a pagar</div>
+              <div className="value">{fmtMoney(detalle.netoPagar)}</div>
+            </div>
+          </div>
           <table>
-            <thead><tr><th>Viaje</th><th>Subtotal</th><th>Comisión</th><th>Total</th></tr></thead>
+            <thead>
+              <tr>
+                <th>Fecha</th><th>Carta de Porte</th><th>Cliente</th><th>Origen</th><th>Destino</th>
+                <th className="num">Tn</th><th className="num">Tarifa</th><th className="num">Bruto</th><th className="num">Descuentos</th><th className="num">Neto</th>
+              </tr>
+            </thead>
             <tbody>
-              {detalle.viajes.map((lv: any) => (
-                <tr key={lv.id}>
-                  <td>N° {lv.viaje.numeroViaje} ({lv.viaje.cereal?.nombre})</td>
-                  <td>{fmtMoney(lv.subtotal)}</td>
-                  <td>{fmtMoney(lv.comisionMonto)} ({lv.comisionPct}%)</td>
-                  <td>{fmtMoney(lv.totalViaje)}</td>
-                </tr>
-              ))}
+              {detalle.planilla.filas.map((f: any) => {
+                const descuentosFila = f.comisionMonto + f.totalAdelantos;
+                const tooltipDescuentos = `Comisión: ${f.comisionPct}% (${fmtMoney(f.comisionMonto)}) · ${CATEGORIAS_ADELANTO.map(
+                  (cat) => `${cat}: ${fmtMoney(f.adelantosPorCategoria[cat])}`,
+                ).join(" · ")}`;
+                return (
+                  <tr key={f.liquidacionViajeId}>
+                    <td>{new Date(f.fecha).toLocaleDateString()}</td>
+                    <td>{f.cartaPorte || "—"}</td>
+                    <td>{f.cliente}</td>
+                    <td>{f.origen}</td>
+                    <td>{f.destino}</td>
+                    <td className="num">{f.toneladas}</td>
+                    <td className="num">{fmtMoney(f.tarifaTonelada)}</td>
+                    <td className="num">{fmtMoney(f.subtotal)}</td>
+                    <td className="num" title={tooltipDescuentos}>{fmtMoney(descuentosFila)}</td>
+                    <td className="num">{fmtMoney(f.saldo)}</td>
+                  </tr>
+                );
+              })}
             </tbody>
+            <tfoot>
+              <tr className="totals-table">
+                <td colSpan={7}>Totales</td>
+                <td className="num">{fmtMoney(detalle.planilla.totales.subtotal)}</td>
+                <td
+                  className="num"
+                  title={`Comisión: ${fmtMoney(detalle.planilla.totales.comisionMonto)} · ${CATEGORIAS_ADELANTO.map(
+                    (cat) => `${cat}: ${fmtMoney(detalle.planilla.totales.adelantosPorCategoria[cat])}`,
+                  ).join(" · ")}`}
+                >
+                  {fmtMoney(detalle.planilla.totales.comisionMonto + detalle.planilla.totales.totalAdelantos)}
+                </td>
+                <td className="num">{fmtMoney(detalle.planilla.totales.saldoFinal)}</td>
+              </tr>
+            </tfoot>
           </table>
-          {detalle.movimientos.length > 0 && (
+          {detalle.planilla.adelantosGenerales.length > 0 && (
             <>
-              <div className="section-title">Anticipos / gastos descontados</div>
+              <div className="section-title">Adelantos / gastos generales del período (sin viaje asociado)</div>
               <table>
-                <thead><tr><th>Fecha</th><th>Tipo</th><th>Importe</th></tr></thead>
+                <thead><tr><th>Fecha</th><th>Tipo</th><th>Categoría</th><th className="num">Importe</th><th>Observación</th><th>Viaje referenciado</th></tr></thead>
                 <tbody>
-                  {detalle.movimientos.map((m: any) => (
-                    <tr key={m.id}><td>{new Date(m.fecha).toLocaleDateString()}</td><td>{m.tipoGasto?.nombre}</td><td>{fmtMoney(m.importe)}</td></tr>
+                  {detalle.planilla.adelantosGenerales.map((a: any) => (
+                    <tr key={a.movimientoId}>
+                      <td>{new Date(a.fecha).toLocaleDateString()}</td>
+                      <td>{a.tipoGasto}</td>
+                      <td>{a.categoria}</td>
+                      <td className="num">{fmtMoney(a.importe)}</td>
+                      <td>{a.observacion || "—"}</td>
+                      <td>{a.numeroViajeReferenciado ? `N° ${a.numeroViajeReferenciado}` : "—"}</td>
+                    </tr>
                   ))}
                 </tbody>
               </table>
             </>
+          )}
+          <div className="actions-row">
+            <button className="btn secondary" onClick={() => setDetalleTecnicoAbierto((v) => !v)}>
+              {detalleTecnicoAbierto ? "Ocultar información completa ▴" : "Ver información completa ▾"}
+            </button>
+          </div>
+          {detalleTecnicoAbierto && (
+            <div style={{ overflowX: "auto" }}>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Fecha</th><th>N°</th><th>Carta de porte</th><th>CTG</th><th>Cereal</th><th>Cliente</th><th>Productor</th><th>N° Factura</th>
+                    <th>Origen</th><th>Destino</th><th className="num">Tn</th><th className="num">Tarifa/tn</th><th className="num">Subtotal</th>
+                    <th className="num">%</th><th className="num">Comisión</th><th className="num">Total</th>
+                    <th className="num">Seguros</th><th className="num">Transf. Bancaria</th><th className="num">Efectivo</th>
+                    <th className="num">Combustible</th><th className="num">Otros</th><th className="num">Saldo</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {detalle.planilla.filas.map((f: any) => (
+                    <tr key={f.liquidacionViajeId}>
+                      <td>{new Date(f.fecha).toLocaleDateString()}</td>
+                      <td>{f.numeroViaje}</td>
+                      <td>{f.cartaPorte || "—"}</td>
+                      <td>{f.ctg || "—"}</td>
+                      <td>{f.cereal}</td>
+                      <td>{f.cliente}</td>
+                      <td>{f.productor || "—"}</td>
+                      <td>{f.facturaNumero || "—"}</td>
+                      <td>{f.origen}</td>
+                      <td>{f.destino}</td>
+                      <td className="num">{f.toneladas}</td>
+                      <td className="num">{fmtMoney(f.tarifaTonelada)}</td>
+                      <td className="num">{fmtMoney(f.subtotal)}</td>
+                      <td className="num">{f.comisionPct}%</td>
+                      <td className="num">{fmtMoney(f.comisionMonto)}</td>
+                      <td className="num">{fmtMoney(f.totalViaje)}</td>
+                      <td className="num">{fmtMoney(f.adelantosPorCategoria["Seguros"])}</td>
+                      <td className="num">{fmtMoney(f.adelantosPorCategoria["Transferencia Bancaria"])}</td>
+                      <td className="num">{fmtMoney(f.adelantosPorCategoria["Efectivo"])}</td>
+                      <td className="num">{fmtMoney(f.adelantosPorCategoria["Combustible"])}</td>
+                      <td className="num">{fmtMoney(f.adelantosPorCategoria["Otros"])}</td>
+                      <td className="num">{fmtMoney(f.saldo)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr className="totals-table">
+                    <td colSpan={12}>Totales</td>
+                    <td className="num">{fmtMoney(detalle.planilla.totales.subtotal)}</td>
+                    <td className="num">—</td>
+                    <td className="num">{fmtMoney(detalle.planilla.totales.comisionMonto)}</td>
+                    <td className="num">{fmtMoney(detalle.planilla.totales.totalViaje)}</td>
+                    <td className="num">{fmtMoney(detalle.planilla.totales.adelantosPorCategoria["Seguros"])}</td>
+                    <td className="num">{fmtMoney(detalle.planilla.totales.adelantosPorCategoria["Transferencia Bancaria"])}</td>
+                    <td className="num">{fmtMoney(detalle.planilla.totales.adelantosPorCategoria["Efectivo"])}</td>
+                    <td className="num">{fmtMoney(detalle.planilla.totales.adelantosPorCategoria["Combustible"])}</td>
+                    <td className="num">{fmtMoney(detalle.planilla.totales.adelantosPorCategoria["Otros"])}</td>
+                    <td className="num">{fmtMoney(detalle.planilla.totales.saldoFinal)}</td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
           )}
           <div className="actions-row">
             <button className="btn secondary" disabled={descargando === `${detalle.id}-excel`} onClick={() => descargar(detalle.id, detalle.numero, "excel")}>

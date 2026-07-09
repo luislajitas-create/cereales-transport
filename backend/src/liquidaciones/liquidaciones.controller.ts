@@ -18,7 +18,12 @@ const includeLiquidacion = {
   creadoPor: { select: { id: true, nombre: true } },
   viajes: {
     include: {
-      viaje: { include: { cereal: true, cliente: true, origen: true, destino: true, camion: true, acoplado: true } },
+      viaje: {
+        include: {
+          cereal: true, cliente: true, productor: true, origen: true, destino: true, camion: true, acoplado: true,
+          facturasViaje: { include: { factura: { select: { numero: true, estado: true } } } },
+        },
+      },
     },
   },
   movimientos: { include: { tipoGasto: true, viaje: { select: { id: true, numeroViaje: true } } } },
@@ -46,16 +51,99 @@ function categorizarAnticipo(nombreTipoGasto: string) {
   return "Otros";
 }
 
-function agruparAnticipos(movimientos: any[]) {
-  const categorias = ["Seguros", "Transferencia Bancaria", "Efectivo", "Combustible", "Otros"];
-  const grupos: Record<string, { items: any[]; total: number }> = {};
-  for (const cat of categorias) grupos[cat] = { items: [], total: 0 };
-  for (const m of movimientos) {
-    const cat = categorizarAnticipo(m.tipoGasto?.nombre);
-    grupos[cat].items.push(m);
-    grupos[cat].total += m.importe;
-  }
-  return categorias.map((cat) => ({ categoria: cat, ...grupos[cat] })).filter((g) => g.items.length > 0);
+const CATEGORIAS_ADELANTO = ["Seguros", "Transferencia Bancaria", "Efectivo", "Combustible", "Otros"];
+
+// Bloque 5.3.2: fuente única de la estructura "planilla" — pantalla, PDF y Excel
+// consumen exactamente esta misma forma de datos, sin recalcular nada por su cuenta.
+// No cambia ningún cálculo existente (totalBruto/totalAnticipos/totalDescuentos/netoPagar
+// siguen viniendo de recomputeTotales, sin tocar); esto solo reorganiza esos mismos
+// movimientos por viaje y por categoría para presentarlos como planilla.
+function construirPlanilla(liquidacion: any) {
+  const filas = liquidacion.viajes.map((lv: any) => {
+    const v = lv.viaje;
+    const adelantosPorCategoria: Record<string, number> = {};
+    for (const cat of CATEGORIAS_ADELANTO) adelantosPorCategoria[cat] = 0;
+    for (const m of liquidacion.movimientos) {
+      if (m.viajeId !== v.id) continue;
+      adelantosPorCategoria[categorizarAnticipo(m.tipoGasto?.nombre)] += m.importe;
+    }
+    const totalAdelantos = CATEGORIAS_ADELANTO.reduce((acc, cat) => acc + adelantosPorCategoria[cat], 0);
+    // Solo facturas vigentes (no ANULADO) — un viaje refacturado tras anular la factura
+    // original (ver commit cb42b66) puede tener más de un FacturaViaje histórico; acá
+    // se ignora el/los anulados para no mostrar como "vigente" un número que ya no lo es.
+    const facturasVigentes = (v.facturasViaje || []).filter((fv: any) => fv.factura?.estado !== "ANULADO");
+    const facturaNumero = facturasVigentes.length > 0 ? facturasVigentes.map((fv: any) => fv.factura.numero).join(", ") : null;
+    return {
+      liquidacionViajeId: lv.id,
+      viajeId: v.id,
+      numeroViaje: v.numeroViaje,
+      fecha: v.fecha,
+      cartaPorte: v.cartaPorte,
+      ctg: v.ctg,
+      cereal: v.cereal?.nombre || "-",
+      cliente: v.cliente?.razonSocial || "-",
+      productor: v.productor?.nombre || null,
+      facturaNumero,
+      origen: v.origen?.nombre || "-",
+      destino: v.destino?.nombre || "-",
+      toneladas: v.toneladas,
+      tarifaTonelada: v.tarifaTonelada,
+      subtotal: lv.subtotal,
+      comisionPct: lv.comisionPct,
+      comisionMonto: lv.comisionMonto,
+      totalViaje: lv.totalViaje,
+      adelantosPorCategoria,
+      totalAdelantos,
+      saldo: lv.totalViaje - totalAdelantos,
+    };
+  });
+
+  // Movimientos sin viajeId, o cuyo viajeId no corresponde a ningún viaje de ESTA
+  // liquidación (p. ej. un gasto cargado contra un viaje de otro período): no tienen
+  // fila propia, van aparte para no perderse ni duplicarse.
+  const viajeIdsEnFilas = new Set(filas.map((f: any) => f.viajeId));
+  const adelantosGenerales = liquidacion.movimientos
+    .filter((m: any) => !m.viajeId || !viajeIdsEnFilas.has(m.viajeId))
+    .map((m: any) => ({
+      movimientoId: m.id,
+      fecha: m.fecha,
+      tipoGasto: m.tipoGasto?.nombre || "-",
+      categoria: categorizarAnticipo(m.tipoGasto?.nombre),
+      importe: m.importe,
+      observacion: m.observacion || null,
+      numeroViajeReferenciado: m.viaje?.numeroViaje || null,
+    }));
+
+  const totalesPorCategoria: Record<string, number> = {};
+  for (const cat of CATEGORIAS_ADELANTO) totalesPorCategoria[cat] = 0;
+  for (const f of filas) for (const cat of CATEGORIAS_ADELANTO) totalesPorCategoria[cat] += f.adelantosPorCategoria[cat];
+  for (const a of adelantosGenerales) totalesPorCategoria[a.categoria] += a.importe;
+
+  const totalSubtotal = filas.reduce((acc: number, f: any) => acc + f.subtotal, 0);
+  const totalComisionMonto = filas.reduce((acc: number, f: any) => acc + f.comisionMonto, 0);
+  const totalTotalViaje = filas.reduce((acc: number, f: any) => acc + f.totalViaje, 0);
+  // Suma de display para la banda de resumen (cantidad de viajes ya es filas.length) —
+  // no participa de ningún total financiero, no es un cálculo de negocio.
+  const totalToneladas = filas.reduce((acc: number, f: any) => acc + f.toneladas, 0);
+  const totalAdelantosGeneral = CATEGORIAS_ADELANTO.reduce((acc, cat) => acc + totalesPorCategoria[cat], 0);
+
+  return {
+    categorias: CATEGORIAS_ADELANTO,
+    filas,
+    adelantosGenerales,
+    totales: {
+      subtotal: totalSubtotal,
+      comisionMonto: totalComisionMonto,
+      totalViaje: totalTotalViaje,
+      toneladas: totalToneladas,
+      adelantosPorCategoria: totalesPorCategoria,
+      totalAdelantos: totalAdelantosGeneral,
+      // Coincide algebraicamente con netoPagar (totalBruto - todos los movimientos),
+      // sirve como verificación cruzada: si no coincide, es un bug de datos, no un
+      // ajuste que el usuario deba reconciliar a mano.
+      saldoFinal: totalTotalViaje - totalAdelantosGeneral,
+    },
+  };
 }
 
 function datosChoferHeader(liquidacion: any) {
@@ -155,7 +243,7 @@ export class LiquidacionesController {
       include: includeLiquidacion,
     });
     if (!liquidacion) throw new NotFoundException("Liquidación no encontrada");
-    return liquidacion;
+    return { ...liquidacion, planilla: construirPlanilla(liquidacion) };
   }
 
   @Get(":id/excel")
@@ -185,41 +273,68 @@ export class LiquidacionesController {
     sheet.addRow([`Estado: ${liquidacion.estado}`]);
     sheet.addRow([]);
 
+    const planilla = construirPlanilla(liquidacion);
+
     sheet.addRow(["Viajes incluidos"]).font = { bold: true };
     const headerViajes = sheet.addRow([
-      "Fecha", "CP", "CTG", "Origen", "Destino", "Toneladas", "Tarifa", "Importe", "Comisión %", "Comisión $", "Total",
+      "Fecha", "N° Viaje", "CP", "CTG", "Cereal", "Cliente", "Productor", "Origen", "Destino",
+      "Toneladas", "Tarifa", "Subtotal", "Comisión %", "Comisión $", "Total",
+      "Seguros", "Transf. Bancaria", "Efectivo", "Combustible", "Otros", "Saldo",
     ]);
     headerViajes.font = { bold: true };
-    for (const lv of liquidacion.viajes) {
+    for (const f of planilla.filas) {
       sheet.addRow([
-        new Date(lv.viaje.fecha).toLocaleDateString("es-AR"),
-        lv.viaje.cartaPorte || "-",
-        lv.viaje.ctg || "-",
-        lv.viaje.origen?.nombre || "-",
-        lv.viaje.destino?.nombre || "-",
-        lv.viaje.toneladas,
-        lv.viaje.tarifaTonelada,
-        lv.subtotal,
-        lv.comisionPct,
-        lv.comisionMonto,
-        lv.totalViaje,
+        new Date(f.fecha).toLocaleDateString("es-AR"),
+        f.numeroViaje,
+        f.cartaPorte || "-",
+        f.ctg || "-",
+        f.cereal,
+        f.cliente,
+        f.productor || "-",
+        f.origen,
+        f.destino,
+        f.toneladas,
+        f.tarifaTonelada,
+        f.subtotal,
+        f.comisionPct,
+        f.comisionMonto,
+        f.totalViaje,
+        f.adelantosPorCategoria["Seguros"],
+        f.adelantosPorCategoria["Transferencia Bancaria"],
+        f.adelantosPorCategoria["Efectivo"],
+        f.adelantosPorCategoria["Combustible"],
+        f.adelantosPorCategoria["Otros"],
+        f.saldo,
       ]);
     }
+    const filaTotalesViajes = sheet.addRow([
+      "", "", "", "", "", "", "", "", "", "", "Totales",
+      planilla.totales.subtotal, "", planilla.totales.comisionMonto, planilla.totales.totalViaje,
+      planilla.totales.adelantosPorCategoria["Seguros"],
+      planilla.totales.adelantosPorCategoria["Transferencia Bancaria"],
+      planilla.totales.adelantosPorCategoria["Efectivo"],
+      planilla.totales.adelantosPorCategoria["Combustible"],
+      planilla.totales.adelantosPorCategoria["Otros"],
+      planilla.totales.saldoFinal,
+    ]);
+    filaTotalesViajes.font = { bold: true };
 
     sheet.addRow([]);
-    if (liquidacion.movimientos.length > 0) {
-      sheet.addRow(["Anticipos / gastos descontados"]).font = { bold: true };
-      const grupos = agruparAnticipos(liquidacion.movimientos);
-      for (const grupo of grupos) {
-        sheet.addRow([grupo.categoria]).font = { bold: true };
-        const headerMov = sheet.addRow(["Fecha", "Tipo", "Importe"]);
-        headerMov.font = { bold: true };
-        for (const m of grupo.items) {
-          sheet.addRow([new Date(m.fecha).toLocaleDateString("es-AR"), m.tipoGasto?.nombre || "-", m.importe]);
-        }
-        sheet.addRow(["", "Subtotal " + grupo.categoria, grupo.total]).font = { bold: true };
-        sheet.addRow([]);
+    if (planilla.adelantosGenerales.length > 0) {
+      sheet.addRow(["Adelantos / gastos generales del período (sin viaje asociado)"]).font = { bold: true };
+      const headerGenerales = sheet.addRow(["Fecha", "Tipo", "Categoría", "Importe", "Observación", "Viaje referenciado"]);
+      headerGenerales.font = { bold: true };
+      for (const a of planilla.adelantosGenerales) {
+        sheet.addRow([
+          new Date(a.fecha).toLocaleDateString("es-AR"),
+          a.tipoGasto,
+          a.categoria,
+          a.importe,
+          a.observacion || "-",
+          a.numeroViajeReferenciado ? `N° ${a.numeroViajeReferenciado}` : "-",
+        ]);
       }
+      sheet.addRow([]);
     }
 
     sheet.addRow(["Total bruto", liquidacion.totalBruto]);
@@ -227,7 +342,7 @@ export class LiquidacionesController {
     sheet.addRow(["Total descuentos", liquidacion.totalDescuentos]);
     sheet.addRow(["Neto a pagar", liquidacion.netoPagar]).font = { bold: true };
 
-    sheet.columns.forEach((col) => { col.width = 22; });
+    sheet.columns.forEach((col) => { col.width = 14; });
 
     const buffer = await workbook.xlsx.writeBuffer();
     res.set({
@@ -250,61 +365,150 @@ export class LiquidacionesController {
       "Content-Disposition": `attachment; filename="liquidacion-${liquidacion.numero}.pdf"`,
     });
 
-    const doc = new PDFDocument({ margin: 50 });
+    const doc = new PDFDocument({ margin: 40 });
     doc.pipe(res);
 
-    doc.fontSize(18).text(`Liquidación N° ${liquidacion.numero}`, { align: "center" });
-    doc.moveDown();
-    doc.fontSize(11);
+    doc.fontSize(16).text(`Liquidación N° ${liquidacion.numero}`, { align: "center" });
+    doc.moveDown(0.3);
+    doc.fontSize(10);
     if (liquidacion.tipo === "CHOFER") {
       const datos = datosChoferHeader(liquidacion);
-      doc.text(`Chofer: ${datos.nombre}`);
-      doc.text(`CUIL: ${datos.cuil}`);
-      doc.text(`Chasis: ${datos.chasis}  ·  Acoplado: ${datos.acoplado}`);
+      doc.text(`Chofer: ${datos.nombre}  ·  CUIL: ${datos.cuil}  ·  Chasis: ${datos.chasis}  ·  Acoplado: ${datos.acoplado}`);
     } else {
-      doc.text(`Tipo: ${liquidacion.tipo}`);
-      doc.text(`Transportista: ${nombreContraparte(liquidacion)}`);
+      doc.text(`Tipo: ${liquidacion.tipo}  ·  Transportista: ${nombreContraparte(liquidacion)}`);
     }
     doc.text(
-      `Período: ${new Date(liquidacion.periodoDesde).toLocaleDateString("es-AR")} - ${new Date(liquidacion.periodoHasta).toLocaleDateString("es-AR")}`,
+      `Período: ${new Date(liquidacion.periodoDesde).toLocaleDateString("es-AR")} - ${new Date(liquidacion.periodoHasta).toLocaleDateString("es-AR")}  ·  Estado: ${liquidacion.estado}`,
     );
-    doc.text(`Estado: ${liquidacion.estado}`);
-    doc.moveDown();
+    doc.moveDown(0.6);
 
-    doc.fontSize(13).text("Viajes incluidos", { underline: true });
-    doc.fontSize(9);
-    for (const lv of liquidacion.viajes) {
-      const v = lv.viaje;
-      doc.text(
-        `${new Date(v.fecha).toLocaleDateString("es-AR")} · CP: ${v.cartaPorte || "-"} · CTG: ${v.ctg || "-"} · ${v.origen?.nombre || "-"} → ${v.destino?.nombre || "-"} · ${v.toneladas} tn · Tarifa: ${fmtMoney(v.tarifaTonelada)}`,
-      );
-      doc.text(
-        `   Importe: ${fmtMoney(lv.subtotal)} · Comisión: ${fmtMoney(lv.comisionMonto)} (${lv.comisionPct}%) · Total: ${fmtMoney(lv.totalViaje)}`,
-      );
-      doc.moveDown(0.3);
-    }
-    doc.moveDown();
+    const planilla = construirPlanilla(liquidacion);
 
-    if (liquidacion.movimientos.length > 0) {
-      doc.fontSize(13).text("Anticipos / gastos descontados", { underline: true });
-      const grupos = agruparAnticipos(liquidacion.movimientos);
-      for (const grupo of grupos) {
-        doc.fontSize(11).text(grupo.categoria, { underline: true });
-        doc.fontSize(10);
-        for (const m of grupo.items) {
-          doc.text(`${new Date(m.fecha).toLocaleDateString("es-AR")} · ${m.tipoGasto?.nombre || "-"} · ${fmtMoney(m.importe)}`);
-        }
-        doc.fontSize(10).text(`Subtotal ${grupo.categoria}: ${fmtMoney(grupo.total)}`);
-        doc.moveDown(0.5);
+    // Mismas 10 columnas "principales" que la pantalla (Fecha/CP/Cliente/Origen/
+    // Destino/Tn/Tarifa/Bruto/Descuentos/Neto), en formato vertical legible/imprimible.
+    // Descuentos = comisión + adelantos combinados, para que Bruto - Descuentos = Neto
+    // se lea de un vistazo sin tener que entender el desglose (ese va en la línea
+    // secundaria de abajo). Los datos secundarios (N°/CTG/Cereal/Productor/desglose
+    // por categoría) van en una línea gris compacta debajo de cada fila principal.
+    const columnas = [
+      { titulo: "Fecha", ancho: 42 },
+      { titulo: "C. Porte", ancho: 55 },
+      { titulo: "Cliente", ancho: 66 },
+      { titulo: "Origen", ancho: 55 },
+      { titulo: "Destino", ancho: 55 },
+      { titulo: "Tn", ancho: 26 },
+      { titulo: "Tarifa", ancho: 42 },
+      { titulo: "Bruto", ancho: 48 },
+      { titulo: "Descuentos", ancho: 56 },
+      { titulo: "Neto", ancho: 50 },
+    ];
+    function truncar(texto: string, ancho: number, tamano: number) {
+      if (doc.widthOfString(texto, { size: tamano }) <= ancho) return texto;
+      let resultado = texto;
+      while (resultado.length > 1 && doc.widthOfString(`${resultado}…`, { size: tamano }) > ancho) {
+        resultado = resultado.slice(0, -1);
       }
-      doc.moveDown();
+      return `${resultado}…`;
     }
 
-    doc.fontSize(11);
-    doc.text(`Total bruto: ${fmtMoney(liquidacion.totalBruto)}`);
-    doc.text(`Total anticipos: ${fmtMoney(liquidacion.totalAnticipos)}`);
-    doc.text(`Total descuentos: ${fmtMoney(liquidacion.totalDescuentos)}`);
-    doc.fontSize(13).text(`Neto a pagar: ${fmtMoney(liquidacion.netoPagar)}`, { underline: true });
+    const xInicio = doc.page.margins.left;
+    const anchoTotal = columnas.reduce((acc, c) => acc + c.ancho, 0);
+    let y = doc.y;
+
+    function saltoDePaginaSiHaceFalta(margenInferior: number) {
+      if (y > doc.page.height - doc.page.margins.bottom - margenInferior) {
+        doc.addPage();
+        y = doc.page.margins.top;
+      }
+    }
+
+    function dibujarFilaPrincipal(valores: string[], opciones: { bold?: boolean } = {}) {
+      saltoDePaginaSiHaceFalta(20);
+      const tamano = 8.5;
+      doc.fillColor("black").font(opciones.bold ? "Helvetica-Bold" : "Helvetica").fontSize(tamano);
+      let x = xInicio;
+      // Cada celda se trunca a su ancho de columna (títulos incluidos): en esta grilla
+      // manual con altura de fila fija, un texto que pdfkit decida envolver a dos
+      // líneas se superpone con la fila siguiente en vez de agrandar la fila.
+      valores.forEach((valor, i) => {
+        doc.text(truncar(valor, columnas[i].ancho, tamano), x, y, { width: columnas[i].ancho, align: i < 5 ? "left" : "right" });
+        x += columnas[i].ancho;
+      });
+      y += 13;
+    }
+
+    function lineaSecundaria(f: any) {
+      const partes = [`N° ${f.numeroViaje}`, `CTG: ${f.ctg || "-"}`, `Cereal: ${f.cereal}`, `Productor: ${f.productor || "-"}`];
+      if (f.totalAdelantos > 0) {
+        const desglose = CATEGORIAS_ADELANTO.filter((cat) => f.adelantosPorCategoria[cat] > 0)
+          .map((cat) => `${cat}: ${fmtMoney(f.adelantosPorCategoria[cat])}`)
+          .join(" · ");
+        partes.push(`Comisión: ${f.comisionPct}% (${fmtMoney(f.comisionMonto)})`);
+        partes.push(`Desc.: ${desglose}`);
+      } else {
+        partes.push(`Comisión: ${f.comisionPct}% (${fmtMoney(f.comisionMonto)})`);
+      }
+      saltoDePaginaSiHaceFalta(15);
+      doc.fillColor("#666666").font("Helvetica").fontSize(7).text(truncar(partes.join("   ·   "), anchoTotal, 7), xInicio, y);
+      doc.fillColor("black");
+      y += 12;
+    }
+
+    dibujarFilaPrincipal(columnas.map((c) => c.titulo), { bold: true });
+    doc.moveTo(xInicio, y - 3).lineTo(xInicio + anchoTotal, y - 3).stroke();
+
+    for (const f of planilla.filas) {
+      const descuentosFila = f.comisionMonto + f.totalAdelantos;
+      dibujarFilaPrincipal([
+        new Date(f.fecha).toLocaleDateString("es-AR"),
+        f.cartaPorte || "-",
+        f.cliente,
+        f.origen,
+        f.destino,
+        String(f.toneladas),
+        fmtMoney(f.tarifaTonelada),
+        fmtMoney(f.subtotal),
+        fmtMoney(descuentosFila),
+        fmtMoney(f.saldo),
+      ]);
+      lineaSecundaria(f);
+      y += 3;
+    }
+
+    const totalDescuentosColumna = planilla.totales.comisionMonto + planilla.totales.totalAdelantos;
+    dibujarFilaPrincipal(
+      ["", "", "", "", "Totales", "", "", fmtMoney(planilla.totales.subtotal), fmtMoney(totalDescuentosColumna), fmtMoney(planilla.totales.saldoFinal)],
+      { bold: true },
+    );
+
+    y += 12;
+
+    if (planilla.adelantosGenerales.length > 0) {
+      saltoDePaginaSiHaceFalta(60);
+      doc.font("Helvetica-Bold").fontSize(10).text("Adelantos / gastos generales del período (sin viaje asociado)", xInicio, y);
+      y += 14;
+      doc.font("Helvetica").fontSize(8);
+      for (const a of planilla.adelantosGenerales) {
+        saltoDePaginaSiHaceFalta(20);
+        doc.text(
+          `${new Date(a.fecha).toLocaleDateString("es-AR")} · ${a.tipoGasto} (${a.categoria}) · ${fmtMoney(a.importe)}${a.numeroViajeReferenciado ? ` · ref. viaje N° ${a.numeroViajeReferenciado}` : ""}`,
+          xInicio,
+          y,
+        );
+        y += 11;
+      }
+      y += 8;
+    }
+
+    saltoDePaginaSiHaceFalta(60);
+    doc.font("Helvetica").fontSize(10);
+    doc.text(`Total bruto: ${fmtMoney(liquidacion.totalBruto)}`, xInicio, y);
+    y += 13;
+    doc.text(`Total anticipos: ${fmtMoney(liquidacion.totalAnticipos)}`, xInicio, y);
+    y += 13;
+    doc.text(`Total descuentos: ${fmtMoney(liquidacion.totalDescuentos)}`, xInicio, y);
+    y += 13;
+    doc.font("Helvetica-Bold").fontSize(12).text(`Neto a pagar: ${fmtMoney(liquidacion.netoPagar)}`, xInicio, y);
 
     doc.end();
   }
