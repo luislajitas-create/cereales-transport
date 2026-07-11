@@ -8,6 +8,7 @@ const NAV_ITEMS = [
   { to: "/liquidaciones", label: "Liquidaciones", roles: ["ADMINISTRADOR", "LIQUIDACIONES", "GERENCIA"] },
   { to: "/facturas", label: "Facturación", roles: ["ADMINISTRADOR", "FACTURACION", "GERENCIA"] },
   { to: "/facturas/conciliacion", label: "Conciliación", roles: ["ADMINISTRADOR", "FACTURACION", "GERENCIA"] },
+  { to: "/inteligencia/dashboard", label: "Dashboard Ejecutivo", roles: ["ADMINISTRADOR", "GERENCIA"] },
   { to: "/inteligencia/rentabilidad", label: "Rentabilidad", roles: ["ADMINISTRADOR", "GERENCIA"] },
   { to: "/inteligencia/cobranzas/aging", label: "Aging de Cobranzas", roles: ["ADMINISTRADOR", "GERENCIA", "FACTURACION"] },
   { to: "/inteligencia/alertas", label: "Centro de Alertas", roles: ["ADMINISTRADOR", "GERENCIA", "FACTURACION", "LIQUIDACIONES", "OPERACIONES"] },
