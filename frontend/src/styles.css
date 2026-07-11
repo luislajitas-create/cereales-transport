@@ -57,6 +57,7 @@ a { color: var(--accent); text-decoration: none; }
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .card { background: white; border-radius: 8px; padding: 1.2rem; box-shadow: 0 1px 3px rgba(0,0,0,0.08); margin-bottom: 1.2rem; }
+.warning-card { border-left: 4px solid var(--warning); }
 .kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; margin-bottom: 1.5rem; }
 .kpi-card { background: white; border-radius: 8px; padding: 1.2rem; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
 .kpi-card .label { font-size: 0.78rem; color: #666; text-transform: uppercase; letter-spacing: 0.03em; }

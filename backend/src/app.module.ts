@@ -8,9 +8,10 @@ import { AnticiposModule } from "./anticipos/anticipos.module";
 import { LiquidacionesModule } from "./liquidaciones/liquidaciones.module";
 import { FacturasModule } from "./facturas/facturas.module";
 import { DashboardModule } from "./dashboard/dashboard.module";
+import { InteligenciaModule } from "./inteligencia/inteligencia.module";
 
 @Module({
-  imports: [PrismaModule, AuthModule, CatalogosModule, ViajesModule, AnticiposModule, LiquidacionesModule, FacturasModule, DashboardModule],
+  imports: [PrismaModule, AuthModule, CatalogosModule, ViajesModule, AnticiposModule, LiquidacionesModule, FacturasModule, DashboardModule, InteligenciaModule],
   controllers: [AppController],
 })
 export class AppModule {}

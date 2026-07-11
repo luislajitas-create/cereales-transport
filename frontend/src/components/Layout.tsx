@@ -8,6 +8,7 @@ const NAV_ITEMS = [
   { to: "/liquidaciones", label: "Liquidaciones", roles: ["ADMINISTRADOR", "LIQUIDACIONES", "GERENCIA"] },
   { to: "/facturas", label: "Facturación", roles: ["ADMINISTRADOR", "FACTURACION", "GERENCIA"] },
   { to: "/facturas/conciliacion", label: "Conciliación", roles: ["ADMINISTRADOR", "FACTURACION", "GERENCIA"] },
+  { to: "/inteligencia/rentabilidad", label: "Rentabilidad", roles: ["ADMINISTRADOR", "GERENCIA"] },
   { to: "/clientes", label: "Clientes", roles: null },
   { to: "/transportistas", label: "Transportistas", roles: null },
   { to: "/catalogos", label: "Catálogos", roles: ["ADMINISTRADOR", "OPERACIONES"] },
