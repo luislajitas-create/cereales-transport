@@ -9,6 +9,7 @@ const NAV_ITEMS = [
   { to: "/facturas", label: "Facturación", roles: ["ADMINISTRADOR", "FACTURACION", "GERENCIA"] },
   { to: "/facturas/conciliacion", label: "Conciliación", roles: ["ADMINISTRADOR", "FACTURACION", "GERENCIA"] },
   { to: "/inteligencia/rentabilidad", label: "Rentabilidad", roles: ["ADMINISTRADOR", "GERENCIA"] },
+  { to: "/inteligencia/cobranzas/aging", label: "Aging de Cobranzas", roles: ["ADMINISTRADOR", "GERENCIA", "FACTURACION"] },
   { to: "/clientes", label: "Clientes", roles: null },
   { to: "/transportistas", label: "Transportistas", roles: null },
   { to: "/catalogos", label: "Catálogos", roles: ["ADMINISTRADOR", "OPERACIONES"] },
