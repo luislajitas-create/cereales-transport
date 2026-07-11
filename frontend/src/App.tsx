@@ -17,6 +17,7 @@ import Rentabilidad from "./pages/Rentabilidad";
 import Aging from "./pages/Aging";
 import Alertas from "./pages/Alertas";
 import DashboardEjecutivo from "./pages/DashboardEjecutivo";
+import Benchmarking from "./pages/Benchmarking";
 
 export default function App() {
   return (
@@ -39,6 +40,7 @@ export default function App() {
           <Route path="/inteligencia/cobranzas/aging" element={<Aging />} />
           <Route path="/inteligencia/alertas" element={<Alertas />} />
           <Route path="/inteligencia/dashboard" element={<DashboardEjecutivo />} />
+          <Route path="/inteligencia/benchmarking" element={<Benchmarking />} />
         </Route>
       </Routes>
     </ConfirmProvider>

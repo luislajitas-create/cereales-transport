@@ -12,6 +12,7 @@ const NAV_ITEMS = [
   { to: "/inteligencia/rentabilidad", label: "Rentabilidad", roles: ["ADMINISTRADOR", "GERENCIA"] },
   { to: "/inteligencia/cobranzas/aging", label: "Aging de Cobranzas", roles: ["ADMINISTRADOR", "GERENCIA", "FACTURACION"] },
   { to: "/inteligencia/alertas", label: "Centro de Alertas", roles: ["ADMINISTRADOR", "GERENCIA", "FACTURACION", "LIQUIDACIONES", "OPERACIONES"] },
+  { to: "/inteligencia/benchmarking", label: "Benchmarking y Tendencias", roles: ["ADMINISTRADOR", "GERENCIA"] },
   { to: "/clientes", label: "Clientes", roles: null },
   { to: "/transportistas", label: "Transportistas", roles: null },
   { to: "/catalogos", label: "Catálogos", roles: ["ADMINISTRADOR", "OPERACIONES"] },

@@ -21,6 +21,14 @@ export interface ViajeEntrada {
   cliente: string;
   transportistaId: string;
   transportista: string;
+  // Bloque 7.3.5 — dimensiones agregadas para Benchmarking (ranking de cereales/rutas),
+  // extensión aditiva de la misma consulta de 7.3.1: no cambia ingreso/costo/margen.
+  cerealId: string;
+  cereal: string;
+  origenId: string;
+  origen: string;
+  destinoId: string;
+  destino: string;
   // Ya filtradas por vigencia (factura.estado !== "ANULADO" / liquidacion.estado !== "ANULADA")
   // por quien arma esta entrada — normalmente 0 o 1 elemento; más de uno es el caso
   // defensivo señalado en el diseño (sección 4), se resuelve tomando la más reciente.
@@ -36,6 +44,12 @@ export interface ViajeCalculado {
   cliente: string;
   transportistaId: string;
   transportista: string;
+  cerealId: string;
+  cereal: string;
+  origenId: string;
+  origen: string;
+  destinoId: string;
+  destino: string;
   ingreso: number;
   costo: number;
   margen: number;
@@ -74,6 +88,11 @@ export interface ResultadoRentabilidad {
   totales: TotalesRentabilidad;
   porCliente: AgregadoDimension[];
   porTransportista: AgregadoDimension[];
+  // Bloque 7.3.5 — mismas dimensiones agregadas que porCliente/porTransportista, sobre
+  // cereal y ruta (origen→destino). "id" de porRuta es compuesto (origenId::destinoId)
+  // porque una ruta no tiene entidad propia en el modelo transaccional.
+  porCereal: AgregadoDimension[];
+  porRuta: AgregadoDimension[];
   detalleViajes: ViajeCalculado[];
   viajesIncompletos: ViajeIncompleto[];
 }
@@ -113,6 +132,12 @@ export function calcularRentabilidad(viajes: ViajeEntrada[]): ResultadoRentabili
         cliente: v.cliente,
         transportistaId: v.transportistaId,
         transportista: v.transportista,
+        cerealId: v.cerealId,
+        cereal: v.cereal,
+        origenId: v.origenId,
+        origen: v.origen,
+        destinoId: v.destinoId,
+        destino: v.destino,
         ingreso,
         costo,
         margen,
@@ -127,6 +152,12 @@ export function calcularRentabilidad(viajes: ViajeEntrada[]): ResultadoRentabili
 
   const porCliente = agregarPorDimension(detalleViajes, (v) => v.clienteId, (v) => v.cliente);
   const porTransportista = agregarPorDimension(detalleViajes, (v) => v.transportistaId, (v) => v.transportista);
+  const porCereal = agregarPorDimension(detalleViajes, (v) => v.cerealId, (v) => v.cereal);
+  const porRuta = agregarPorDimension(
+    detalleViajes,
+    (v) => `${v.origenId}::${v.destinoId}`,
+    (v) => `${v.origen} → ${v.destino}`,
+  );
 
   const ingresoTotal = detalleViajes.reduce((acc, v) => acc + v.ingreso, 0);
   const costoTotal = detalleViajes.reduce((acc, v) => acc + v.costo, 0);
@@ -143,6 +174,8 @@ export function calcularRentabilidad(viajes: ViajeEntrada[]): ResultadoRentabili
     },
     porCliente,
     porTransportista,
+    porCereal,
+    porRuta,
     detalleViajes,
     viajesIncompletos,
   };
