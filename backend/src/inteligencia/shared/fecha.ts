@@ -19,3 +19,9 @@ export function diferenciaEnDias(desde: Date, hasta: Date): number {
   const MS_POR_DIA = 24 * 60 * 60 * 1000;
   return Math.round((normalizarFecha(hasta).getTime() - normalizarFecha(desde).getTime()) / MS_POR_DIA);
 }
+
+export function primerDiaDelMes(referencia: Date): Date {
+  const d = new Date(referencia);
+  d.setDate(1);
+  return d;
+}

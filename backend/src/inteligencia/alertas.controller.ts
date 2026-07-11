@@ -4,7 +4,7 @@ import { RolesGuard } from "../auth/roles.guard";
 import { Roles } from "../auth/roles.decorator";
 import { CurrentUser } from "../auth/current-user.decorator";
 import { AlertasService } from "./alertas.service";
-import { TipoAlerta } from "./reportes/alertas.calc";
+import { TipoAlerta } from "./alertas/alertas.calc";
 import { hoyNormalizado } from "./shared/fecha";
 
 // Filtrado por rol (BLOQUE7.3.3a_DISENO_ALERTAS.md, sección 9) — siempre en backend, nunca

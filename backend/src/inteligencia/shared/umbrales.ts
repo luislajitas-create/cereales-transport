@@ -3,7 +3,9 @@
 // nunca en alertas.calc.ts ni en ningún controller: las fórmulas de severidad no cambian
 // cuando estos números cambien.
 
-export const FACTURA_VENCIDA_SEVERIDAD_POR_BUCKET: Record<"0-30" | "31-60" | "61-90" | "+90", "informativa" | "preventiva" | "critica"> = {
+import { BucketAging } from "../reportes/aging.calc";
+
+export const FACTURA_VENCIDA_SEVERIDAD_POR_BUCKET: Record<BucketAging, "informativa" | "preventiva" | "critica"> = {
   "0-30": "informativa",
   "31-60": "preventiva",
   "61-90": "critica",

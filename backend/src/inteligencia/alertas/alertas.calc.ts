@@ -3,9 +3,12 @@
 // HTTP: recibe los resultados ya calculados por aging.calc.ts/rentabilidad.calc.ts (nunca
 // los recalcula) más los datos crudos que todavía no tienen dueño en el Motor
 // (AnticipoGasto, HistorialEstadoViaje) ya leídos por AlertasController.
+// Bloque 7.3.4.1 — movido de reportes/ a esta carpeta (BLOQUE7.3_ARQUITECTURA_DEL_CENTRO_DE_INTELIGENCIA.md,
+// Parte 6), reservada para esta capacidad desde 7.3.1. Sin cambios de contenido salvo el
+// tipo BucketAging, ahora importado desde su única fuente en vez de re-declarado.
 
-import { ResultadoAging } from "./aging.calc";
-import { ResultadoRentabilidad } from "./rentabilidad.calc";
+import { ResultadoAging, BucketAging } from "../reportes/aging.calc";
+import { ResultadoRentabilidad } from "../reportes/rentabilidad.calc";
 import { severidadPorUmbral, severidadPorUmbralDescendente, Severidad } from "../shared/severidad";
 import { diferenciaEnDias } from "../shared/fecha";
 import * as U from "../shared/umbrales";
@@ -72,7 +75,7 @@ function alertasFacturaVencida(aging: ResultadoAging): Alerta[] {
     .filter((f) => f.vencida)
     .map((f) => ({
       tipo: "factura_vencida",
-      severidad: U.FACTURA_VENCIDA_SEVERIDAD_POR_BUCKET[f.bucket as "0-30" | "31-60" | "61-90" | "+90"],
+      severidad: U.FACTURA_VENCIDA_SEVERIDAD_POR_BUCKET[f.bucket as BucketAging],
       entidadId: f.facturaId,
       entidadNombre: f.numero,
       mensaje: `Factura ${f.numero} de ${f.cliente} vencida hace ${f.diasMora} día(s)`,

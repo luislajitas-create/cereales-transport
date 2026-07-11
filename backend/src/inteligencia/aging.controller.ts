@@ -3,13 +3,7 @@ import { JwtAuthGuard } from "../auth/jwt-auth.guard";
 import { RolesGuard } from "../auth/roles.guard";
 import { Roles } from "../auth/roles.decorator";
 import { AgingService } from "./aging.service";
-import { hoyNormalizado } from "./shared/fecha";
-
-function primerDiaDelMes(referencia: Date): Date {
-  const d = new Date(referencia);
-  d.setDate(1);
-  return d;
-}
+import { hoyNormalizado, primerDiaDelMes } from "./shared/fecha";
 
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller("inteligencia/cobranzas")

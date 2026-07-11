@@ -5,13 +5,7 @@ import { Roles } from "../auth/roles.decorator";
 import { RentabilidadService } from "./rentabilidad.service";
 import { AgingService } from "./aging.service";
 import { AlertasService } from "./alertas.service";
-import { hoyNormalizado } from "./shared/fecha";
-
-function primerDiaDelMes(referencia: Date): Date {
-  const d = new Date(referencia);
-  d.setDate(1);
-  return d;
-}
+import { hoyNormalizado, primerDiaDelMes } from "./shared/fecha";
 
 const TOP_N = 5;
 const ORDEN_SEVERIDAD: Record<string, number> = { critica: 0, preventiva: 1, informativa: 2 };

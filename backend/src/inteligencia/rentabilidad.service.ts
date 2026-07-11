@@ -5,6 +5,51 @@ import { calcularRentabilidad, ViajeEntrada, ResultadoRentabilidad } from "./rep
 // Extraído de InteligenciaController (Bloque 7.3.4) para que Dashboard Ejecutivo pueda
 // reutilizar el mismo resultado sin consultar Prisma por su cuenta — mismo comportamiento,
 // misma consulta, que antes vivía inline en el controller.
+
+// Bloque 7.3.4.1 — fetch + mapeo de Viaje→ViajeEntrada, reutilizado también por
+// AlertasService (regla 8, BLOQUE7.3.0_MOTOR_DE_INTELIGENCIA.md). Filtro de vigencia
+// obligatorio (BLOQUE7.3.1_DISENO_RENTABILIDAD.md, sección 4) para cualquier `where` que
+// reciba: solo entran filas de FacturaViaje/LiquidacionViaje cuyo documento padre no esté
+// anulado — un viaje con Factura o Liquidación anulada y no reemitida no debe aparecer con
+// datos, sino en viajesIncompletos (calculado por reportes/rentabilidad.calc.ts). `orderBy`
+// es opcional a propósito: RentabilidadService lo necesita, AlertasService no y no debe
+// heredarlo.
+export async function obtenerViajesEntrada(prisma: PrismaService, where: any, orderBy?: any): Promise<ViajeEntrada[]> {
+  const viajes = await prisma.viaje.findMany({
+    where,
+    select: {
+      id: true,
+      numeroViaje: true,
+      fecha: true,
+      clienteId: true,
+      cliente: { select: { razonSocial: true } },
+      transportistaId: true,
+      transportista: { select: { razonSocial: true } },
+      facturasViaje: {
+        where: { factura: { estado: { not: "ANULADO" } } },
+        select: { importeViaje: true, factura: { select: { fecha: true } } },
+      },
+      liquidacionesViaje: {
+        where: { liquidacion: { estado: { not: "ANULADA" } } },
+        select: { totalViaje: true, liquidacion: { select: { createdAt: true } } },
+      },
+    },
+    ...(orderBy ? { orderBy } : {}),
+  });
+
+  return viajes.map((v) => ({
+    id: v.id,
+    numeroViaje: v.numeroViaje,
+    fecha: v.fecha,
+    clienteId: v.clienteId,
+    cliente: v.cliente.razonSocial,
+    transportistaId: v.transportistaId,
+    transportista: v.transportista.razonSocial,
+    facturasVigentes: v.facturasViaje.map((fv) => ({ importeViaje: fv.importeViaje, fecha: fv.factura.fecha })),
+    liquidacionesVigentes: v.liquidacionesViaje.map((lv) => ({ totalViaje: lv.totalViaje, fecha: lv.liquidacion.createdAt })),
+  }));
+}
+
 @Injectable()
 export class RentabilidadService {
   constructor(private prisma: PrismaService) {}
@@ -17,43 +62,7 @@ export class RentabilidadService {
     if (clienteId) where.clienteId = clienteId;
     if (transportistaId) where.transportistaId = transportistaId;
 
-    // Filtro de vigencia obligatorio (BLOQUE7.3.1_DISENO_RENTABILIDAD.md, sección 4):
-    // solo se traen filas de FacturaViaje/LiquidacionViaje cuyo documento padre no esté
-    // anulado — un viaje con Factura o Liquidación anulada y no reemitida no debe
-    // aparecer con datos, sino en viajesIncompletos (calculado por reportes/rentabilidad.calc.ts).
-    const viajes = await this.prisma.viaje.findMany({
-      where,
-      select: {
-        id: true,
-        numeroViaje: true,
-        fecha: true,
-        clienteId: true,
-        cliente: { select: { razonSocial: true } },
-        transportistaId: true,
-        transportista: { select: { razonSocial: true } },
-        facturasViaje: {
-          where: { factura: { estado: { not: "ANULADO" } } },
-          select: { importeViaje: true, factura: { select: { fecha: true } } },
-        },
-        liquidacionesViaje: {
-          where: { liquidacion: { estado: { not: "ANULADA" } } },
-          select: { totalViaje: true, liquidacion: { select: { createdAt: true } } },
-        },
-      },
-      orderBy: { fecha: "asc" },
-    });
-
-    const entrada: ViajeEntrada[] = viajes.map((v) => ({
-      id: v.id,
-      numeroViaje: v.numeroViaje,
-      fecha: v.fecha,
-      clienteId: v.clienteId,
-      cliente: v.cliente.razonSocial,
-      transportistaId: v.transportistaId,
-      transportista: v.transportista.razonSocial,
-      facturasVigentes: v.facturasViaje.map((fv) => ({ importeViaje: fv.importeViaje, fecha: fv.factura.fecha })),
-      liquidacionesVigentes: v.liquidacionesViaje.map((lv) => ({ totalViaje: lv.totalViaje, fecha: lv.liquidacion.createdAt })),
-    }));
+    const entrada = await obtenerViajesEntrada(this.prisma, where, { fecha: "asc" });
 
     return calcularRentabilidad(entrada);
   }

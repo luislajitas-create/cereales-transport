@@ -4,6 +4,43 @@ import { calcularAging, FacturaEntrada, ResultadoAging } from "./reportes/aging.
 
 // Extraído de AgingController (Bloque 7.3.4) — mismo comportamiento, misma consulta, que
 // antes vivía inline en el controller. Dashboard Ejecutivo lo reutiliza sin tocar Prisma.
+
+// Bloque 7.3.4.1 — fetch + mapeo de Factura→FacturaEntrada, reutilizado también por
+// AlertasService (regla 8, BLOQUE7.3.0_MOTOR_DE_INTELIGENCIA.md). `orderBy` es opcional a
+// propósito: AgingService lo necesita, AlertasService no y no debe heredarlo.
+export async function obtenerFacturasEntrada(prisma: PrismaService, where: any, orderBy?: any): Promise<FacturaEntrada[]> {
+  const facturas = await prisma.factura.findMany({
+    where,
+    select: {
+      id: true,
+      numero: true,
+      fecha: true,
+      vencimiento: true,
+      importe: true,
+      estado: true,
+      clienteId: true,
+      cliente: { select: { razonSocial: true } },
+      cobranzas: {
+        where: { anulada: false },
+        select: { importe: true, fecha: true },
+      },
+    },
+    ...(orderBy ? { orderBy } : {}),
+  });
+
+  return facturas.map((f) => ({
+    id: f.id,
+    numero: f.numero,
+    fecha: f.fecha,
+    vencimiento: f.vencimiento,
+    importe: f.importe,
+    estado: f.estado,
+    clienteId: f.clienteId,
+    cliente: f.cliente.razonSocial,
+    cobranzasVigentes: f.cobranzas.map((c) => ({ importe: c.importe, fecha: c.fecha })),
+  }));
+}
+
 @Injectable()
 export class AgingService {
   constructor(private prisma: PrismaService) {}
@@ -15,36 +52,7 @@ export class AgingService {
     const where: any = { estado: { not: "ANULADO" } };
     if (clienteId) where.clienteId = clienteId;
 
-    const facturas = await this.prisma.factura.findMany({
-      where,
-      select: {
-        id: true,
-        numero: true,
-        fecha: true,
-        vencimiento: true,
-        importe: true,
-        estado: true,
-        clienteId: true,
-        cliente: { select: { razonSocial: true } },
-        cobranzas: {
-          where: { anulada: false },
-          select: { importe: true, fecha: true },
-        },
-      },
-      orderBy: { vencimiento: "asc" },
-    });
-
-    const entrada: FacturaEntrada[] = facturas.map((f) => ({
-      id: f.id,
-      numero: f.numero,
-      fecha: f.fecha,
-      vencimiento: f.vencimiento,
-      importe: f.importe,
-      estado: f.estado,
-      clienteId: f.clienteId,
-      cliente: f.cliente.razonSocial,
-      cobranzasVigentes: f.cobranzas.map((c) => ({ importe: c.importe, fecha: c.fecha })),
-    }));
+    const entrada = await obtenerFacturasEntrada(this.prisma, where, { vencimiento: "asc" });
 
     return calcularAging(entrada, periodoDesde, periodoHasta, hoy);
   }
