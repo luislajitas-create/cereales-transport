@@ -15,6 +15,7 @@ import Facturas from "./pages/Facturas";
 import Conciliacion from "./pages/Conciliacion";
 import Rentabilidad from "./pages/Rentabilidad";
 import Aging from "./pages/Aging";
+import Alertas from "./pages/Alertas";
 
 export default function App() {
   return (
@@ -35,6 +36,7 @@ export default function App() {
           <Route path="/facturas/conciliacion" element={<Conciliacion />} />
           <Route path="/inteligencia/rentabilidad" element={<Rentabilidad />} />
           <Route path="/inteligencia/cobranzas/aging" element={<Aging />} />
+          <Route path="/inteligencia/alertas" element={<Alertas />} />
         </Route>
       </Routes>
     </ConfirmProvider>
