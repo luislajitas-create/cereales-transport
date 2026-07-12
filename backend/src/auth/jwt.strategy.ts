@@ -5,10 +5,11 @@ import { ExtractJwt, Strategy } from "passport-jwt";
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
   constructor() {
+    // JWT_SECRET ya fue validada en main.ts (validarEntorno()) — nunca hay un valor por defecto acá.
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
       ignoreExpiration: false,
-      secretOrKey: process.env.JWT_SECRET || "dev-secret-change-me",
+      secretOrKey: process.env.JWT_SECRET,
     });
   }
 

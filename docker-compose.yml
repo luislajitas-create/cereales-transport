@@ -27,7 +27,7 @@ services:
         condition: service_healthy
     environment:
       DATABASE_URL: "postgresql://postgres:postgres@db:5432/cereal_db?schema=public"
-      JWT_SECRET: "cambiar-este-secreto-en-produccion"
+      JWT_SECRET: "solo-para-desarrollo-local-docker-compose-nunca-usar-en-produccion"
       CORS_ORIGIN: "http://localhost:5173"
       PORT: 3000
     ports:

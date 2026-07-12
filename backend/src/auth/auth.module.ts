@@ -8,8 +8,10 @@ import { JwtStrategy } from "./jwt.strategy";
 @Module({
   imports: [
     PassportModule,
+    // JWT_SECRET ya fue validada en main.ts (validarEntorno(), antes de que este módulo se
+    // importe) — nunca hay un valor por defecto acá.
     JwtModule.register({
-      secret: process.env.JWT_SECRET || "dev-secret-change-me",
+      secret: process.env.JWT_SECRET,
       signOptions: { expiresIn: "12h" },
     }),
   ],
