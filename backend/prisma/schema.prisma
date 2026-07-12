@@ -73,192 +73,290 @@ enum EstadoFacturaEnum {
   ANULADO
 }
 
-model Usuario {
-  id           String    @id @default(uuid())
-  nombre       String
-  email        String    @unique
-  passwordHash String
-  rol          RolNombre
-  activo       Boolean   @default(true)
-  createdAt    DateTime  @default(now())
+// Bloque 8.1.b, Etapa 1 (Schema inicial) — fundamento del modelo multiempresa.
+// Ver BLOQUE8.1_DISENO_MULTIEMPRESA.md y BLOQUE8.1_PLAN_IMPLEMENTACION_MULTIEMPRESA.md.
+// Campos mínimos para identificar una empresa — sin configuración comercial, moneda,
+// branding, planes ni límites todavía (fuera de alcance de esta etapa).
+model Organizacion {
+  id        String   @id @default(uuid())
+  nombre    String
+  createdAt DateTime @default(now())
 
-  viajesCreados       Viaje[]               @relation("ViajeCreadoPor")
-  historialCambios    HistorialEstadoViaje[]
+  usuarios               Usuario[]
+  clientes               Cliente[]
+  contactos              Contacto[]
+  productores            Productor[]
+  transportistas         Transportista[]
+  choferes               Chofer[]
+  vehiculos              Vehiculo[]
+  cereales               Cereal[]
+  ubicaciones            Ubicacion[]
+  tiposGasto             TipoGasto[]
+  viajes                 Viaje[]
+  historialEstadoViajes  HistorialEstadoViaje[]
+  anticiposGasto         AnticipoGasto[]
+  liquidaciones          Liquidacion[]
+  liquidacionesViaje     LiquidacionViaje[]
+  liquidacionMovimientos LiquidacionMovimiento[]
+  facturas               Factura[]
+  facturasViaje          FacturaViaje[]
+  cobranzas              Cobranza[]
+  auditLogs              AuditLog[]
+}
+
+model Usuario {
+  id             String    @id @default(uuid())
+  organizacionId String?
+  nombre         String
+  email          String    @unique
+  passwordHash   String
+  rol            RolNombre
+  activo         Boolean   @default(true)
+  createdAt      DateTime  @default(now())
+
+  organizacion Organizacion? @relation(fields: [organizacionId], references: [id])
+
+  viajesCreados        Viaje[]                @relation("ViajeCreadoPor")
+  historialCambios     HistorialEstadoViaje[]
   anticiposRegistrados AnticipoGasto[]
-  liquidacionesCreadas Liquidacion[]        @relation("LiquidacionCreadaPor")
-  auditLogs           AuditLog[]
+  liquidacionesCreadas Liquidacion[]          @relation("LiquidacionCreadaPor")
+  auditLogs            AuditLog[]
+
+  @@index([organizacionId])
+  @@unique([id, organizacionId])
 }
 
 model Cliente {
   id                     String   @id @default(uuid())
+  organizacionId         String?
   razonSocial            String
   cuit                   String   @unique
   condicionesComerciales String?
   activo                 Boolean  @default(true)
   createdAt              DateTime @default(now())
 
+  organizacion Organizacion? @relation(fields: [organizacionId], references: [id])
+
   contactos Contacto[]
   viajes    Viaje[]
   facturas  Factura[]
+
+  @@index([organizacionId])
+  @@unique([id, organizacionId])
 }
 
 model Contacto {
-  id        String  @id @default(uuid())
-  clienteId String
-  nombre    String
-  telefono  String?
-  email     String?
-  cliente   Cliente @relation(fields: [clienteId], references: [id], onDelete: Cascade)
+  id             String  @id @default(uuid())
+  organizacionId String?
+  clienteId      String
+  nombre         String
+  telefono       String?
+  email          String?
+
+  organizacion Organizacion? @relation(fields: [organizacionId], references: [id])
+  cliente      Cliente       @relation(fields: [clienteId], references: [id], onDelete: Cascade)
+
+  @@index([organizacionId])
 }
 
 model Productor {
-  id        String  @id @default(uuid())
-  nombre    String
-  cuit      String? @unique
-  localidad String?
-  viajes    Viaje[]
+  id             String  @id @default(uuid())
+  organizacionId String?
+  nombre         String
+  cuit           String? @unique
+  localidad      String?
+
+  organizacion Organizacion? @relation(fields: [organizacionId], references: [id])
+  viajes       Viaje[]
+
+  @@index([organizacionId])
+  @@unique([id, organizacionId])
 }
 
 model Transportista {
-  id          String   @id @default(uuid())
-  razonSocial String
-  cuit        String   @unique
-  domicilio   String?
-  activo      Boolean  @default(true)
-  createdAt   DateTime @default(now())
+  id             String   @id @default(uuid())
+  organizacionId String?
+  razonSocial    String
+  cuit           String   @unique
+  domicilio      String?
+  activo         Boolean  @default(true)
+  createdAt      DateTime @default(now())
+
+  organizacion Organizacion? @relation(fields: [organizacionId], references: [id])
 
   choferes      Chofer[]
   vehiculos     Vehiculo[]
   viajes        Viaje[]
   liquidaciones Liquidacion[]
   anticipos     AnticipoGasto[]
+
+  @@index([organizacionId])
+  @@unique([id, organizacionId])
 }
 
 model Chofer {
-  id                  String   @id @default(uuid())
+  id                  String    @id @default(uuid())
+  organizacionId      String?
   transportistaId     String
   nombre              String
-  dni                 String?  @unique
-  cuil                String   @unique
-  comisionPct         Float    @default(0)
+  dni                 String?   @unique
+  cuil                String    @unique
+  comisionPct         Float     @default(0)
   licenciaNumero      String?
   licenciaVencimiento DateTime?
   telefono            String?
-  activo              Boolean  @default(true)
+  activo              Boolean   @default(true)
 
+  organizacion  Organizacion? @relation(fields: [organizacionId], references: [id])
   transportista Transportista @relation(fields: [transportistaId], references: [id])
+
   viajes        Viaje[]
   anticipos     AnticipoGasto[]
   liquidaciones Liquidacion[]
+
+  @@index([organizacionId])
+  @@unique([id, organizacionId])
 }
 
 model Vehiculo {
-  id                 String       @id @default(uuid())
-  transportistaId    String
-  patente            String       @unique
-  marca              String?
-  modelo             String?
-  tipo               TipoVehiculo
-  capacidadKg        Float?
-  vencimientoRto     DateTime?
-  vencimientoSeguro  DateTime?
-  activo             Boolean      @default(true)
+  id                String       @id @default(uuid())
+  organizacionId    String?
+  transportistaId   String
+  patente           String       @unique
+  marca             String?
+  modelo            String?
+  tipo              TipoVehiculo
+  capacidadKg       Float?
+  vencimientoRto    DateTime?
+  vencimientoSeguro DateTime?
+  activo            Boolean      @default(true)
 
-  transportista     Transportista @relation(fields: [transportistaId], references: [id])
-  viajesComoCamion  Viaje[]       @relation("ViajeCamion")
-  viajesComoAcoplado Viaje[]      @relation("ViajeAcoplado")
+  organizacion  Organizacion? @relation(fields: [organizacionId], references: [id])
+  transportista Transportista @relation(fields: [transportistaId], references: [id])
+
+  viajesComoCamion   Viaje[] @relation("ViajeCamion")
+  viajesComoAcoplado Viaje[] @relation("ViajeAcoplado")
+
+  @@index([organizacionId])
+  @@unique([id, organizacionId])
 }
 
 model Cereal {
-  id     String  @id @default(uuid())
-  nombre String  @unique
-  viajes Viaje[]
+  id             String  @id @default(uuid())
+  organizacionId String?
+  nombre         String  @unique
+
+  organizacion Organizacion? @relation(fields: [organizacionId], references: [id])
+  viajes       Viaje[]
+
+  @@index([organizacionId])
+  @@unique([id, organizacionId])
 }
 
 model Ubicacion {
-  id        String        @id @default(uuid())
-  nombre    String
-  tipo      TipoUbicacion
-  localidad String?
+  id             String        @id @default(uuid())
+  organizacionId String?
+  nombre         String
+  tipo           TipoUbicacion
+  localidad      String?
+
+  organizacion Organizacion? @relation(fields: [organizacionId], references: [id])
 
   viajesOrigen  Viaje[] @relation("ViajeOrigen")
   viajesDestino Viaje[] @relation("ViajeDestino")
+
+  @@index([organizacionId])
+  @@unique([id, organizacionId])
 }
 
 model TipoGasto {
   id                String  @id @default(uuid())
+  organizacionId    String?
   nombre            String  @unique
   afectaLiquidacion Boolean @default(true)
 
-  anticipos  AnticipoGasto[]
+  organizacion Organizacion? @relation(fields: [organizacionId], references: [id])
+
+  anticipos   AnticipoGasto[]
   movimientos LiquidacionMovimiento[]
+
+  @@index([organizacionId])
+  @@unique([id, organizacionId])
 }
 
 model Viaje {
-  id                 String                 @id @default(uuid())
-  numeroViaje        Int                    @default(autoincrement())
-  fecha              DateTime
-  cartaPorte         String
-  ctg                String                 @unique
-  cerealId           String
-  clienteId          String
-  productorId        String?
-  transportistaId    String
-  choferId           String
-  camionId           String
-  acopladoId         String?
-  origenId           String
-  destinoId          String
-  toneladas          Float
-  tarifaTonelada     Float
-  importeTotal       Float
-  estado             EstadoViajeEnum        @default(PENDIENTE)
-  estadoFacturacion  EstadoFacturacionEnum  @default(PENDIENTE_DE_FACTURAR)
-  estadoLiquidacion  EstadoLiquidacionItemEnum @default(PENDIENTE)
-  observaciones      String?
-  creadoPorId        String?
-  createdAt          DateTime               @default(now())
-  updatedAt          DateTime               @updatedAt
+  id                String                    @id @default(uuid())
+  organizacionId    String?
+  numeroViaje       Int                       @default(autoincrement())
+  fecha             DateTime
+  cartaPorte        String
+  ctg               String                    @unique
+  cerealId          String
+  clienteId         String
+  productorId       String?
+  transportistaId   String
+  choferId          String
+  camionId          String
+  acopladoId        String?
+  origenId          String
+  destinoId         String
+  toneladas         Float
+  tarifaTonelada    Float
+  importeTotal      Float
+  estado            EstadoViajeEnum           @default(PENDIENTE)
+  estadoFacturacion EstadoFacturacionEnum     @default(PENDIENTE_DE_FACTURAR)
+  estadoLiquidacion EstadoLiquidacionItemEnum @default(PENDIENTE)
+  observaciones     String?
+  creadoPorId       String?
+  createdAt         DateTime                  @default(now())
+  updatedAt         DateTime                  @updatedAt
 
-  cereal         Cereal         @relation(fields: [cerealId], references: [id])
-  cliente        Cliente        @relation(fields: [clienteId], references: [id])
-  productor      Productor?     @relation(fields: [productorId], references: [id])
-  transportista  Transportista  @relation(fields: [transportistaId], references: [id])
-  chofer         Chofer         @relation(fields: [choferId], references: [id])
-  camion         Vehiculo       @relation("ViajeCamion", fields: [camionId], references: [id])
-  acoplado       Vehiculo?      @relation("ViajeAcoplado", fields: [acopladoId], references: [id])
-  origen         Ubicacion      @relation("ViajeOrigen", fields: [origenId], references: [id])
-  destino        Ubicacion      @relation("ViajeDestino", fields: [destinoId], references: [id])
-  creadoPor      Usuario?       @relation("ViajeCreadoPor", fields: [creadoPorId], references: [id])
+  organizacion  Organizacion?  @relation(fields: [organizacionId], references: [id])
+  cereal        Cereal         @relation(fields: [cerealId], references: [id])
+  cliente       Cliente        @relation(fields: [clienteId], references: [id])
+  productor     Productor?     @relation(fields: [productorId], references: [id])
+  transportista Transportista  @relation(fields: [transportistaId], references: [id])
+  chofer        Chofer         @relation(fields: [choferId], references: [id])
+  camion        Vehiculo       @relation("ViajeCamion", fields: [camionId], references: [id])
+  acoplado      Vehiculo?      @relation("ViajeAcoplado", fields: [acopladoId], references: [id])
+  origen        Ubicacion      @relation("ViajeOrigen", fields: [origenId], references: [id])
+  destino       Ubicacion      @relation("ViajeDestino", fields: [destinoId], references: [id])
+  creadoPor     Usuario?       @relation("ViajeCreadoPor", fields: [creadoPorId], references: [id])
 
-  historial          HistorialEstadoViaje[]
-  anticipos           AnticipoGasto[]
-  liquidacionesViaje   LiquidacionViaje[]
-  facturasViaje        FacturaViaje[]
+  historial              HistorialEstadoViaje[]
+  anticipos              AnticipoGasto[]
+  liquidacionesViaje     LiquidacionViaje[]
+  facturasViaje          FacturaViaje[]
   liquidacionMovimientos LiquidacionMovimiento[]
 
   @@index([fecha])
   @@index([clienteId])
   @@index([transportistaId])
   @@index([estado])
+  @@index([organizacionId])
+  @@unique([id, organizacionId])
 }
 
 model HistorialEstadoViaje {
   id             String   @id @default(uuid())
+  organizacionId String?
   viajeId        String
   estadoAnterior String?
   estadoNuevo    String
   usuarioId      String?
   fecha          DateTime @default(now())
 
-  viaje   Viaje    @relation(fields: [viajeId], references: [id], onDelete: Cascade)
-  usuario Usuario? @relation(fields: [usuarioId], references: [id])
+  organizacion Organizacion? @relation(fields: [organizacionId], references: [id])
+  viaje        Viaje         @relation(fields: [viajeId], references: [id], onDelete: Cascade)
+  usuario      Usuario?      @relation(fields: [usuarioId], references: [id])
 
   @@index([viajeId])
+  @@index([organizacionId])
 }
 
 model AnticipoGasto {
-  id              String    @id @default(uuid())
+  id              String   @id @default(uuid())
+  organizacionId  String?
   viajeId         String?
   choferId        String
   transportistaId String
@@ -268,24 +366,29 @@ model AnticipoGasto {
   observaciones   String?
   usuarioId       String?
   comprobanteUrl  String?
-  anulado         Boolean   @default(false)
+  anulado         Boolean  @default(false)
   anuladoMotivo   String?
-  liquidado       Boolean   @default(false)
-  createdAt       DateTime  @default(now())
+  liquidado       Boolean  @default(false)
+  createdAt       DateTime @default(now())
 
+  organizacion  Organizacion? @relation(fields: [organizacionId], references: [id])
   viaje         Viaje?        @relation(fields: [viajeId], references: [id])
   chofer        Chofer        @relation(fields: [choferId], references: [id])
   transportista Transportista @relation(fields: [transportistaId], references: [id])
   tipoGasto     TipoGasto     @relation(fields: [tipoGastoId], references: [id])
   usuario       Usuario?      @relation(fields: [usuarioId], references: [id])
+
   liquidacionMovimientos LiquidacionMovimiento[]
 
   @@index([choferId, fecha])
   @@index([transportistaId, fecha])
+  @@index([organizacionId])
+  @@unique([id, organizacionId])
 }
 
 model Liquidacion {
   id              String                @id @default(uuid())
+  organizacionId  String?
   numero          Int                   @default(autoincrement())
   tipo            TipoLiquidacion
   transportistaId String?
@@ -303,6 +406,7 @@ model Liquidacion {
   createdAt       DateTime              @default(now())
   updatedAt       DateTime              @updatedAt
 
+  organizacion  Organizacion?  @relation(fields: [organizacionId], references: [id])
   transportista Transportista? @relation(fields: [transportistaId], references: [id])
   chofer        Chofer?        @relation(fields: [choferId], references: [id])
   creadoPor     Usuario?       @relation("LiquidacionCreadaPor", fields: [creadoPorId], references: [id])
@@ -312,26 +416,32 @@ model Liquidacion {
 
   @@index([transportistaId])
   @@index([choferId])
+  @@index([organizacionId])
+  @@unique([id, organizacionId])
 }
 
 model LiquidacionViaje {
-  id            String  @id @default(uuid())
-  liquidacionId String
-  viajeId       String
-  subtotal      Float
-  comisionPct   Float
-  comisionMonto Float
-  totalViaje    Float
+  id             String  @id @default(uuid())
+  organizacionId String?
+  liquidacionId  String
+  viajeId        String
+  subtotal       Float
+  comisionPct    Float
+  comisionMonto  Float
+  totalViaje     Float
 
-  liquidacion Liquidacion @relation(fields: [liquidacionId], references: [id], onDelete: Cascade)
-  viaje       Viaje       @relation(fields: [viajeId], references: [id])
+  organizacion Organizacion? @relation(fields: [organizacionId], references: [id])
+  liquidacion  Liquidacion   @relation(fields: [liquidacionId], references: [id], onDelete: Cascade)
+  viaje        Viaje         @relation(fields: [viajeId], references: [id])
 
   @@index([liquidacionId])
   @@index([viajeId])
+  @@index([organizacionId])
 }
 
 model LiquidacionMovimiento {
   id              String   @id @default(uuid())
+  organizacionId  String?
   liquidacionId   String
   viajeId         String?
   tipoGastoId     String
@@ -339,8 +449,9 @@ model LiquidacionMovimiento {
   importe         Float
   fecha           DateTime
   observacion     String?
-  comprobanteUrl String?
+  comprobanteUrl  String?
 
+  organizacion  Organizacion?  @relation(fields: [organizacionId], references: [id])
   liquidacion   Liquidacion    @relation(fields: [liquidacionId], references: [id], onDelete: Cascade)
   viaje         Viaje?         @relation(fields: [viajeId], references: [id])
   tipoGasto     TipoGasto      @relation(fields: [tipoGastoId], references: [id])
@@ -348,57 +459,70 @@ model LiquidacionMovimiento {
 
   @@index([liquidacionId])
   @@index([anticipoGastoId])
+  @@index([organizacionId])
 }
 
 model Factura {
-  id          String            @id @default(uuid())
-  clienteId   String
-  numero      String            @unique
-  fecha       DateTime
-  vencimiento DateTime
-  importe     Float
-  estado      EstadoFacturaEnum @default(FACTURADO)
-  createdAt   DateTime          @default(now())
+  id             String            @id @default(uuid())
+  organizacionId String?
+  clienteId      String
+  numero         String            @unique
+  fecha          DateTime
+  vencimiento    DateTime
+  importe        Float
+  estado         EstadoFacturaEnum @default(FACTURADO)
+  createdAt      DateTime          @default(now())
 
-  cliente   Cliente         @relation(fields: [clienteId], references: [id])
+  organizacion Organizacion? @relation(fields: [organizacionId], references: [id])
+  cliente      Cliente       @relation(fields: [clienteId], references: [id])
+
   viajes    FacturaViaje[]
   cobranzas Cobranza[]
 
   @@index([clienteId])
   @@index([vencimiento])
+  @@index([organizacionId])
+  @@unique([id, organizacionId])
 }
 
 model FacturaViaje {
-  id            String  @id @default(uuid())
-  facturaId     String
-  viajeId       String
-  importeViaje  Float
+  id             String  @id @default(uuid())
+  organizacionId String?
+  facturaId      String
+  viajeId        String
+  importeViaje   Float
 
-  factura Factura @relation(fields: [facturaId], references: [id], onDelete: Cascade)
-  viaje   Viaje   @relation(fields: [viajeId], references: [id])
+  organizacion Organizacion? @relation(fields: [organizacionId], references: [id])
+  factura      Factura       @relation(fields: [facturaId], references: [id], onDelete: Cascade)
+  viaje        Viaje         @relation(fields: [viajeId], references: [id])
 
   @@index([facturaId])
   @@index([viajeId])
+  @@index([organizacionId])
 }
 
 model Cobranza {
-  id            String    @id @default(uuid())
-  facturaId     String
-  fecha         DateTime
-  importe       Float
-  medioPago     String?
-  observacion   String?
-  anulada       Boolean   @default(false)
-  anuladaMotivo String?
-  anuladaFecha  DateTime?
+  id             String    @id @default(uuid())
+  organizacionId String?
+  facturaId      String
+  fecha          DateTime
+  importe        Float
+  medioPago      String?
+  observacion    String?
+  anulada        Boolean   @default(false)
+  anuladaMotivo  String?
+  anuladaFecha   DateTime?
 
-  factura Factura @relation(fields: [facturaId], references: [id], onDelete: Cascade)
+  organizacion Organizacion? @relation(fields: [organizacionId], references: [id])
+  factura      Factura       @relation(fields: [facturaId], references: [id], onDelete: Cascade)
 
   @@index([facturaId])
+  @@index([organizacionId])
 }
 
 model AuditLog {
   id              String   @id @default(uuid())
+  organizacionId  String?
   usuarioId       String?
   entidad         String
   entidadId       String
@@ -407,7 +531,9 @@ model AuditLog {
   datosNuevos     Json?
   fecha           DateTime @default(now())
 
-  usuario Usuario? @relation(fields: [usuarioId], references: [id])
+  organizacion Organizacion? @relation(fields: [organizacionId], references: [id])
+  usuario      Usuario?      @relation(fields: [usuarioId], references: [id])
 
   @@index([entidad, entidadId])
+  @@index([organizacionId])
 }
