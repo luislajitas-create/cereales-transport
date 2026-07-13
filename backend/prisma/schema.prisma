@@ -155,7 +155,7 @@ model Contacto {
   email          String?
 
   organizacion Organizacion? @relation(fields: [organizacionId], references: [id], onDelete: Restrict, onUpdate: Cascade)
-  cliente      Cliente       @relation(fields: [clienteId], references: [id], onDelete: Cascade)
+  cliente      Cliente       @relation(fields: [clienteId, organizacionId], references: [id, organizacionId], onDelete: Cascade)
 
   @@index([organizacionId])
 }
@@ -211,7 +211,7 @@ model Chofer {
   activo              Boolean   @default(true)
 
   organizacion  Organizacion? @relation(fields: [organizacionId], references: [id], onDelete: Restrict, onUpdate: Cascade)
-  transportista Transportista @relation(fields: [transportistaId], references: [id])
+  transportista Transportista @relation(fields: [transportistaId, organizacionId], references: [id, organizacionId])
 
   viajes        Viaje[]
   anticipos     AnticipoGasto[]
@@ -237,7 +237,7 @@ model Vehiculo {
   activo            Boolean      @default(true)
 
   organizacion  Organizacion? @relation(fields: [organizacionId], references: [id], onDelete: Restrict, onUpdate: Cascade)
-  transportista Transportista @relation(fields: [transportistaId], references: [id])
+  transportista Transportista @relation(fields: [transportistaId, organizacionId], references: [id, organizacionId])
 
   viajesComoCamion   Viaje[] @relation("ViajeCamion")
   viajesComoAcoplado Viaje[] @relation("ViajeAcoplado")
@@ -320,16 +320,16 @@ model Viaje {
   updatedAt         DateTime                  @updatedAt
 
   organizacion  Organizacion?  @relation(fields: [organizacionId], references: [id], onDelete: Restrict, onUpdate: Cascade)
-  cereal        Cereal         @relation(fields: [cerealId], references: [id])
-  cliente       Cliente        @relation(fields: [clienteId], references: [id])
-  productor     Productor?     @relation(fields: [productorId], references: [id])
-  transportista Transportista  @relation(fields: [transportistaId], references: [id])
-  chofer        Chofer         @relation(fields: [choferId], references: [id])
-  camion        Vehiculo       @relation("ViajeCamion", fields: [camionId], references: [id])
-  acoplado      Vehiculo?      @relation("ViajeAcoplado", fields: [acopladoId], references: [id])
-  origen        Ubicacion      @relation("ViajeOrigen", fields: [origenId], references: [id])
-  destino       Ubicacion      @relation("ViajeDestino", fields: [destinoId], references: [id])
-  creadoPor     Usuario?       @relation("ViajeCreadoPor", fields: [creadoPorId], references: [id])
+  cereal        Cereal         @relation(fields: [cerealId, organizacionId], references: [id, organizacionId])
+  cliente       Cliente        @relation(fields: [clienteId, organizacionId], references: [id, organizacionId])
+  productor     Productor?     @relation(fields: [productorId, organizacionId], references: [id, organizacionId])
+  transportista Transportista  @relation(fields: [transportistaId, organizacionId], references: [id, organizacionId])
+  chofer        Chofer         @relation(fields: [choferId, organizacionId], references: [id, organizacionId])
+  camion        Vehiculo       @relation("ViajeCamion", fields: [camionId, organizacionId], references: [id, organizacionId])
+  acoplado      Vehiculo?      @relation("ViajeAcoplado", fields: [acopladoId, organizacionId], references: [id, organizacionId])
+  origen        Ubicacion      @relation("ViajeOrigen", fields: [origenId, organizacionId], references: [id, organizacionId])
+  destino       Ubicacion      @relation("ViajeDestino", fields: [destinoId, organizacionId], references: [id, organizacionId])
+  creadoPor     Usuario?       @relation("ViajeCreadoPor", fields: [creadoPorId, organizacionId], references: [id, organizacionId])
 
   historial              HistorialEstadoViaje[]
   anticipos              AnticipoGasto[]
@@ -356,8 +356,8 @@ model HistorialEstadoViaje {
   fecha          DateTime @default(now())
 
   organizacion Organizacion? @relation(fields: [organizacionId], references: [id], onDelete: Restrict, onUpdate: Cascade)
-  viaje        Viaje         @relation(fields: [viajeId], references: [id], onDelete: Cascade)
-  usuario      Usuario?      @relation(fields: [usuarioId], references: [id])
+  viaje        Viaje         @relation(fields: [viajeId, organizacionId], references: [id, organizacionId], onDelete: Cascade)
+  usuario      Usuario?      @relation(fields: [usuarioId, organizacionId], references: [id, organizacionId])
 
   @@index([viajeId])
   @@index([organizacionId])
@@ -381,11 +381,11 @@ model AnticipoGasto {
   createdAt       DateTime @default(now())
 
   organizacion  Organizacion? @relation(fields: [organizacionId], references: [id], onDelete: Restrict, onUpdate: Cascade)
-  viaje         Viaje?        @relation(fields: [viajeId], references: [id])
-  chofer        Chofer        @relation(fields: [choferId], references: [id])
-  transportista Transportista @relation(fields: [transportistaId], references: [id])
-  tipoGasto     TipoGasto     @relation(fields: [tipoGastoId], references: [id])
-  usuario       Usuario?      @relation(fields: [usuarioId], references: [id])
+  viaje         Viaje?        @relation(fields: [viajeId, organizacionId], references: [id, organizacionId])
+  chofer        Chofer        @relation(fields: [choferId, organizacionId], references: [id, organizacionId])
+  transportista Transportista @relation(fields: [transportistaId, organizacionId], references: [id, organizacionId])
+  tipoGasto     TipoGasto     @relation(fields: [tipoGastoId, organizacionId], references: [id, organizacionId])
+  usuario       Usuario?      @relation(fields: [usuarioId, organizacionId], references: [id, organizacionId])
 
   liquidacionMovimientos LiquidacionMovimiento[]
 
@@ -416,9 +416,9 @@ model Liquidacion {
   updatedAt       DateTime              @updatedAt
 
   organizacion  Organizacion?  @relation(fields: [organizacionId], references: [id], onDelete: Restrict, onUpdate: Cascade)
-  transportista Transportista? @relation(fields: [transportistaId], references: [id])
-  chofer        Chofer?        @relation(fields: [choferId], references: [id])
-  creadoPor     Usuario?       @relation("LiquidacionCreadaPor", fields: [creadoPorId], references: [id])
+  transportista Transportista? @relation(fields: [transportistaId, organizacionId], references: [id, organizacionId])
+  chofer        Chofer?        @relation(fields: [choferId, organizacionId], references: [id, organizacionId])
+  creadoPor     Usuario?       @relation("LiquidacionCreadaPor", fields: [creadoPorId, organizacionId], references: [id, organizacionId])
 
   viajes      LiquidacionViaje[]
   movimientos LiquidacionMovimiento[]
@@ -440,8 +440,8 @@ model LiquidacionViaje {
   totalViaje     Float
 
   organizacion Organizacion? @relation(fields: [organizacionId], references: [id], onDelete: Restrict, onUpdate: Cascade)
-  liquidacion  Liquidacion   @relation(fields: [liquidacionId], references: [id], onDelete: Cascade)
-  viaje        Viaje         @relation(fields: [viajeId], references: [id])
+  liquidacion  Liquidacion   @relation(fields: [liquidacionId, organizacionId], references: [id, organizacionId], onDelete: Cascade)
+  viaje        Viaje         @relation(fields: [viajeId, organizacionId], references: [id, organizacionId])
 
   @@index([liquidacionId])
   @@index([viajeId])
@@ -461,10 +461,10 @@ model LiquidacionMovimiento {
   comprobanteUrl  String?
 
   organizacion  Organizacion?  @relation(fields: [organizacionId], references: [id], onDelete: Restrict, onUpdate: Cascade)
-  liquidacion   Liquidacion    @relation(fields: [liquidacionId], references: [id], onDelete: Cascade)
-  viaje         Viaje?         @relation(fields: [viajeId], references: [id])
-  tipoGasto     TipoGasto      @relation(fields: [tipoGastoId], references: [id])
-  anticipoGasto AnticipoGasto? @relation(fields: [anticipoGastoId], references: [id])
+  liquidacion   Liquidacion    @relation(fields: [liquidacionId, organizacionId], references: [id, organizacionId], onDelete: Cascade)
+  viaje         Viaje?         @relation(fields: [viajeId, organizacionId], references: [id, organizacionId])
+  tipoGasto     TipoGasto      @relation(fields: [tipoGastoId, organizacionId], references: [id, organizacionId])
+  anticipoGasto AnticipoGasto? @relation(fields: [anticipoGastoId, organizacionId], references: [id, organizacionId])
 
   @@index([liquidacionId])
   @@index([anticipoGastoId])
@@ -483,7 +483,7 @@ model Factura {
   createdAt      DateTime          @default(now())
 
   organizacion Organizacion? @relation(fields: [organizacionId], references: [id], onDelete: Restrict, onUpdate: Cascade)
-  cliente      Cliente       @relation(fields: [clienteId], references: [id])
+  cliente      Cliente       @relation(fields: [clienteId, organizacionId], references: [id, organizacionId])
 
   viajes    FacturaViaje[]
   cobranzas Cobranza[]
@@ -503,8 +503,8 @@ model FacturaViaje {
   importeViaje   Float
 
   organizacion Organizacion? @relation(fields: [organizacionId], references: [id], onDelete: Restrict, onUpdate: Cascade)
-  factura      Factura       @relation(fields: [facturaId], references: [id], onDelete: Cascade)
-  viaje        Viaje         @relation(fields: [viajeId], references: [id])
+  factura      Factura       @relation(fields: [facturaId, organizacionId], references: [id, organizacionId], onDelete: Cascade)
+  viaje        Viaje         @relation(fields: [viajeId, organizacionId], references: [id, organizacionId])
 
   @@index([facturaId])
   @@index([viajeId])
@@ -524,7 +524,7 @@ model Cobranza {
   anuladaFecha   DateTime?
 
   organizacion Organizacion? @relation(fields: [organizacionId], references: [id], onDelete: Restrict, onUpdate: Cascade)
-  factura      Factura       @relation(fields: [facturaId], references: [id], onDelete: Cascade)
+  factura      Factura       @relation(fields: [facturaId, organizacionId], references: [id, organizacionId], onDelete: Cascade)
 
   @@index([facturaId])
   @@index([organizacionId])
@@ -542,7 +542,7 @@ model AuditLog {
   fecha           DateTime @default(now())
 
   organizacion Organizacion? @relation(fields: [organizacionId], references: [id], onDelete: Restrict, onUpdate: Cascade)
-  usuario      Usuario?      @relation(fields: [usuarioId], references: [id])
+  usuario      Usuario?      @relation(fields: [usuarioId, organizacionId], references: [id, organizacionId])
 
   @@index([entidad, entidadId])
   @@index([organizacionId])
