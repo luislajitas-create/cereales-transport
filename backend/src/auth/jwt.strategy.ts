@@ -1,4 +1,4 @@
-import { Injectable } from "@nestjs/common";
+import { Injectable, UnauthorizedException } from "@nestjs/common";
 import { PassportStrategy } from "@nestjs/passport";
 import { ExtractJwt, Strategy } from "passport-jwt";
 
@@ -14,6 +14,15 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
   }
 
   async validate(payload: any) {
-    return { id: payload.sub, email: payload.email, rol: payload.rol, nombre: payload.nombre };
+    if (typeof payload.organizacionId !== "string" || payload.organizacionId.length === 0) {
+      throw new UnauthorizedException("Token sin contexto de organización");
+    }
+    return {
+      id: payload.sub,
+      email: payload.email,
+      rol: payload.rol,
+      nombre: payload.nombre,
+      organizacionId: payload.organizacionId,
+    };
   }
 }

@@ -1,4 +1,4 @@
-import { Injectable, UnauthorizedException } from "@nestjs/common";
+import { ForbiddenException, Injectable, UnauthorizedException } from "@nestjs/common";
 import { JwtService } from "@nestjs/jwt";
 import * as bcrypt from "bcryptjs";
 import { PrismaService } from "../prisma/prisma.service";
@@ -12,12 +12,25 @@ export class AuthService {
     if (!usuario || !usuario.activo) throw new UnauthorizedException("Credenciales inválidas");
     const ok = await bcrypt.compare(password, usuario.passwordHash);
     if (!ok) throw new UnauthorizedException("Credenciales inválidas");
+    if (!usuario.organizacionId) throw new ForbiddenException("Usuario sin organización asignada");
 
-    const payload = { sub: usuario.id, email: usuario.email, rol: usuario.rol, nombre: usuario.nombre };
+    const payload = {
+      sub: usuario.id,
+      email: usuario.email,
+      rol: usuario.rol,
+      nombre: usuario.nombre,
+      organizacionId: usuario.organizacionId,
+    };
     const accessToken = this.jwt.sign(payload, { expiresIn: "12h" });
     return {
       accessToken,
-      usuario: { id: usuario.id, nombre: usuario.nombre, email: usuario.email, rol: usuario.rol },
+      usuario: {
+        id: usuario.id,
+        nombre: usuario.nombre,
+        email: usuario.email,
+        rol: usuario.rol,
+        organizacionId: usuario.organizacionId,
+      },
     };
   }
 }
