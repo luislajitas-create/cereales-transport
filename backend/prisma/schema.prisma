@@ -130,7 +130,7 @@ model Cliente {
   id                     String   @id @default(uuid())
   organizacionId         String
   razonSocial            String
-  cuit                   String   @unique
+  cuit                   String
   condicionesComerciales String?
   activo                 Boolean  @default(true)
   createdAt              DateTime @default(now())
@@ -143,6 +143,7 @@ model Cliente {
 
   @@index([organizacionId])
   @@unique([id, organizacionId])
+  @@unique([organizacionId, cuit])
 }
 
 model Contacto {
@@ -163,7 +164,7 @@ model Productor {
   id             String  @id @default(uuid())
   organizacionId String
   nombre         String
-  cuit           String? @unique
+  cuit           String?
   localidad      String?
 
   organizacion Organizacion? @relation(fields: [organizacionId], references: [id], onDelete: Restrict, onUpdate: Cascade)
@@ -171,13 +172,14 @@ model Productor {
 
   @@index([organizacionId])
   @@unique([id, organizacionId])
+  @@unique([organizacionId, cuit])
 }
 
 model Transportista {
   id             String   @id @default(uuid())
   organizacionId String
   razonSocial    String
-  cuit           String   @unique
+  cuit           String
   domicilio      String?
   activo         Boolean  @default(true)
   createdAt      DateTime @default(now())
@@ -192,6 +194,7 @@ model Transportista {
 
   @@index([organizacionId])
   @@unique([id, organizacionId])
+  @@unique([organizacionId, cuit])
 }
 
 model Chofer {
@@ -199,8 +202,8 @@ model Chofer {
   organizacionId      String
   transportistaId     String
   nombre              String
-  dni                 String?   @unique
-  cuil                String    @unique
+  dni                 String?
+  cuil                String
   comisionPct         Float     @default(0)
   licenciaNumero      String?
   licenciaVencimiento DateTime?
@@ -216,13 +219,15 @@ model Chofer {
 
   @@index([organizacionId])
   @@unique([id, organizacionId])
+  @@unique([organizacionId, dni])
+  @@unique([organizacionId, cuil])
 }
 
 model Vehiculo {
   id                String       @id @default(uuid())
   organizacionId    String
   transportistaId   String
-  patente           String       @unique
+  patente           String
   marca             String?
   modelo            String?
   tipo              TipoVehiculo
@@ -239,18 +244,20 @@ model Vehiculo {
 
   @@index([organizacionId])
   @@unique([id, organizacionId])
+  @@unique([organizacionId, patente])
 }
 
 model Cereal {
   id             String  @id @default(uuid())
   organizacionId String
-  nombre         String  @unique
+  nombre         String
 
   organizacion Organizacion? @relation(fields: [organizacionId], references: [id], onDelete: Restrict, onUpdate: Cascade)
   viajes       Viaje[]
 
   @@index([organizacionId])
   @@unique([id, organizacionId])
+  @@unique([organizacionId, nombre])
 }
 
 model Ubicacion {
@@ -272,7 +279,7 @@ model Ubicacion {
 model TipoGasto {
   id                String  @id @default(uuid())
   organizacionId    String
-  nombre            String  @unique
+  nombre            String
   afectaLiquidacion Boolean @default(true)
 
   organizacion Organizacion? @relation(fields: [organizacionId], references: [id], onDelete: Restrict, onUpdate: Cascade)
@@ -282,6 +289,7 @@ model TipoGasto {
 
   @@index([organizacionId])
   @@unique([id, organizacionId])
+  @@unique([organizacionId, nombre])
 }
 
 model Viaje {
@@ -290,7 +298,7 @@ model Viaje {
   numeroViaje       Int                       @default(autoincrement())
   fecha             DateTime
   cartaPorte        String
-  ctg               String                    @unique
+  ctg               String
   cerealId          String
   clienteId         String
   productorId       String?
@@ -335,6 +343,7 @@ model Viaje {
   @@index([estado])
   @@index([organizacionId])
   @@unique([id, organizacionId])
+  @@unique([organizacionId, ctg])
 }
 
 model HistorialEstadoViaje {
@@ -466,7 +475,7 @@ model Factura {
   id             String            @id @default(uuid())
   organizacionId String
   clienteId      String
-  numero         String            @unique
+  numero         String
   fecha          DateTime
   vencimiento    DateTime
   importe        Float
@@ -483,6 +492,7 @@ model Factura {
   @@index([vencimiento])
   @@index([organizacionId])
   @@unique([id, organizacionId])
+  @@unique([organizacionId, numero])
 }
 
 model FacturaViaje {
