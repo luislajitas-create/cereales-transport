@@ -8,7 +8,6 @@ import {
   UbicacionesController,
   TiposGastoController,
   ProductoresController,
-  UsuariosController,
 } from "./simples.controller";
 
 @Module({
@@ -21,7 +20,6 @@ import {
     UbicacionesController,
     TiposGastoController,
     ProductoresController,
-    UsuariosController,
   ],
 })
 export class CatalogosModule {}

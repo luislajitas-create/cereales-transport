@@ -49,12 +49,3 @@ export class ProductoresController {
     return this.prisma.productor.update({ where: { id }, data: body });
   }
 }
-
-@UseGuards(JwtAuthGuard)
-@Controller("usuarios")
-export class UsuariosController {
-  constructor(@Inject(ORGANIZACION_PRISMA) private prisma: OrganizacionPrismaClient) {}
-  @Get() findAll() {
-    return this.prisma.usuario.findMany({ select: { id: true, nombre: true, email: true, rol: true, activo: true } });
-  }
-}

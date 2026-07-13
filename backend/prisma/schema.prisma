@@ -102,6 +102,7 @@ model Organizacion {
   facturasViaje          FacturaViaje[]
   cobranzas              Cobranza[]
   auditLogs              AuditLog[]
+  passwordResetTokens    PasswordResetToken[]
 }
 
 model Usuario {
@@ -121,9 +122,33 @@ model Usuario {
   anticiposRegistrados AnticipoGasto[]
   liquidacionesCreadas Liquidacion[]          @relation("LiquidacionCreadaPor")
   auditLogs            AuditLog[]
+  passwordResetTokens  PasswordResetToken[]
 
   @@index([organizacionId])
   @@unique([id, organizacionId])
+}
+
+// Bloque 9.1/9.3 — token de un solo uso para activación de cuenta nueva (creada por un
+// administrador) y para recuperación de contraseña olvidada. Se guarda únicamente el hash
+// del token (tokenHash), nunca el valor en texto plano — mismo principio que Usuario.passwordHash.
+// Se consulta con el cliente crudo de Prisma en el momento de canjearlo (BLOQUE9_DISENO_
+// ADMINISTRACION.md, sección 5): todavía no existe contexto de organización autenticado en
+// ese momento. Se genera, en cambio, siempre con ORGANIZACION_PRISMA (acción administrativa
+// autenticada).
+model PasswordResetToken {
+  id             String    @id @default(uuid())
+  organizacionId String
+  usuarioId      String
+  tokenHash      String    @unique
+  expiresAt      DateTime
+  usedAt         DateTime?
+  createdAt      DateTime  @default(now())
+
+  organizacion Organizacion? @relation(fields: [organizacionId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  usuario      Usuario       @relation(fields: [usuarioId, organizacionId], references: [id, organizacionId], onDelete: Cascade, onUpdate: Cascade)
+
+  @@index([organizacionId])
+  @@index([usuarioId])
 }
 
 model Cliente {
