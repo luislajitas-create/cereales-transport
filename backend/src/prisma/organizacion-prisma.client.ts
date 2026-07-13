@@ -171,7 +171,67 @@ export function crearClienteOrganizacional(prisma: PrismaService) {
   });
 }
 
-export type OrganizacionPrismaClient = Omit<
-  ReturnType<typeof crearClienteOrganizacional>,
-  "$queryRaw" | "$queryRawUnsafe" | "$executeRaw" | "$executeRawUnsafe"
+type NombrePropiedadModeloOrganizacional =
+  | "usuario" | "cliente" | "contacto" | "productor" | "transportista" | "chofer" | "vehiculo"
+  | "cereal" | "ubicacion" | "tipoGasto" | "viaje" | "historialEstadoViaje" | "anticipoGasto"
+  | "liquidacion" | "liquidacionViaje" | "liquidacionMovimiento" | "factura" | "facturaViaje"
+  | "cobranza" | "auditLog";
+
+type MetodosDeLecturaSinCambios<T> = Pick<
+  T,
+  Extract<keyof T, "findMany" | "findFirst" | "findUnique" | "findUniqueOrThrow" | "count" | "aggregate" | "groupBy">
 >;
+
+// Las escrituras (create/createMany/update/updateMany/upsert/delete/deleteMany) inyectan
+// organizacionId automáticamente en runtime (ver arriba) — pero los tipos que genera Prisma
+// para estos métodos no lo reflejan, porque las Query Extensions no alteran los tipos de
+// argumentos ni de retorno (documentado por Prisma: "query extensions do not affect types").
+// Tipar estos 7 métodos `any` es la única forma honesta de reflejar en TypeScript algo que ya
+// es cierto en runtime, sin tocar ningún controller ni relajar la seguridad de tipos de las
+// lecturas (que sí mantienen su tipado completo).
+type MetodosDeEscrituraFlexibles = {
+  create: (args: any) => Promise<any>;
+  createMany: (args: any) => Promise<any>;
+  update: (args: any) => Promise<any>;
+  updateMany: (args: any) => Promise<any>;
+  upsert: (args: any) => Promise<any>;
+  delete: (args: any) => Promise<any>;
+  deleteMany: (args: any) => Promise<any>;
+};
+
+type DelegadoOrganizacional<T> = MetodosDeLecturaSinCambios<T> & MetodosDeEscrituraFlexibles;
+
+type ClienteExtendidoBase = ReturnType<typeof crearClienteOrganizacional>;
+
+type BaseConLecturaYEscrituraFlexible = Omit<
+  ClienteExtendidoBase,
+  | "$queryRaw" | "$queryRawUnsafe" | "$executeRaw" | "$executeRawUnsafe"
+  | "$transaction"
+  | NombrePropiedadModeloOrganizacional
+> & {
+  [K in NombrePropiedadModeloOrganizacional]: DelegadoOrganizacional<ClienteExtendidoBase[K]>;
+};
+
+// Cliente de transacción (tx): dos usos preexistentes en facturas.controller.ts (anteriores a
+// Bloque 8) hacen `tx.$queryRaw\`SELECT id FROM "Factura" WHERE id = ... FOR UPDATE\`` para
+// bloquear la fila durante la transacción — no se toca ese controller en este sub-bloque, así
+// que $queryRaw (la forma parametrizada segura, no $queryRawUnsafe) se restaura únicamente acá,
+// solo para tx. El cliente de nivel superior (OrganizacionPrismaClient, lo que reciben los
+// controllers por DI) sigue sin exponer ningún acceso raw.
+type ClienteTransaccion = BaseConLecturaYEscrituraFlexible & {
+  $queryRaw: ClienteExtendidoBase["$queryRaw"];
+};
+
+// $transaction(async (tx) => {...}) — la forma interactiva, la única que usa el código real
+// (confirmado: los 7 usos existentes en facturas.controller.ts/liquidaciones.controller.ts son
+// todos callback, no la forma array). Prisma tipa `tx` de forma independiente a partir de su
+// propia firma de $transaction, sin heredar el ajuste de arriba — por eso se redeclara acá.
+// tx tiene exactamente las mismas garantías de aislamiento que el cliente de nivel superior
+// (ver spike técnico: la extensión se propaga dentro de $transaction), más $queryRaw por el
+// motivo de arriba.
+export type OrganizacionPrismaClient = BaseConLecturaYEscrituraFlexible & {
+  $transaction<R>(
+    fn: (tx: ClienteTransaccion) => Promise<R>,
+    options?: { maxWait?: number; timeout?: number; isolationLevel?: unknown },
+  ): Promise<R>;
+};

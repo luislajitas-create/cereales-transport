@@ -106,7 +106,7 @@ model Organizacion {
 
 model Usuario {
   id             String    @id @default(uuid())
-  organizacionId String?
+  organizacionId String
   nombre         String
   email          String    @unique
   passwordHash   String
@@ -114,7 +114,7 @@ model Usuario {
   activo         Boolean   @default(true)
   createdAt      DateTime  @default(now())
 
-  organizacion Organizacion? @relation(fields: [organizacionId], references: [id])
+  organizacion Organizacion? @relation(fields: [organizacionId], references: [id], onDelete: Restrict, onUpdate: Cascade)
 
   viajesCreados        Viaje[]                @relation("ViajeCreadoPor")
   historialCambios     HistorialEstadoViaje[]
@@ -128,14 +128,14 @@ model Usuario {
 
 model Cliente {
   id                     String   @id @default(uuid())
-  organizacionId         String?
+  organizacionId         String
   razonSocial            String
   cuit                   String   @unique
   condicionesComerciales String?
   activo                 Boolean  @default(true)
   createdAt              DateTime @default(now())
 
-  organizacion Organizacion? @relation(fields: [organizacionId], references: [id])
+  organizacion Organizacion? @relation(fields: [organizacionId], references: [id], onDelete: Restrict, onUpdate: Cascade)
 
   contactos Contacto[]
   viajes    Viaje[]
@@ -147,13 +147,13 @@ model Cliente {
 
 model Contacto {
   id             String  @id @default(uuid())
-  organizacionId String?
+  organizacionId String
   clienteId      String
   nombre         String
   telefono       String?
   email          String?
 
-  organizacion Organizacion? @relation(fields: [organizacionId], references: [id])
+  organizacion Organizacion? @relation(fields: [organizacionId], references: [id], onDelete: Restrict, onUpdate: Cascade)
   cliente      Cliente       @relation(fields: [clienteId], references: [id], onDelete: Cascade)
 
   @@index([organizacionId])
@@ -161,12 +161,12 @@ model Contacto {
 
 model Productor {
   id             String  @id @default(uuid())
-  organizacionId String?
+  organizacionId String
   nombre         String
   cuit           String? @unique
   localidad      String?
 
-  organizacion Organizacion? @relation(fields: [organizacionId], references: [id])
+  organizacion Organizacion? @relation(fields: [organizacionId], references: [id], onDelete: Restrict, onUpdate: Cascade)
   viajes       Viaje[]
 
   @@index([organizacionId])
@@ -175,14 +175,14 @@ model Productor {
 
 model Transportista {
   id             String   @id @default(uuid())
-  organizacionId String?
+  organizacionId String
   razonSocial    String
   cuit           String   @unique
   domicilio      String?
   activo         Boolean  @default(true)
   createdAt      DateTime @default(now())
 
-  organizacion Organizacion? @relation(fields: [organizacionId], references: [id])
+  organizacion Organizacion? @relation(fields: [organizacionId], references: [id], onDelete: Restrict, onUpdate: Cascade)
 
   choferes      Chofer[]
   vehiculos     Vehiculo[]
@@ -196,7 +196,7 @@ model Transportista {
 
 model Chofer {
   id                  String    @id @default(uuid())
-  organizacionId      String?
+  organizacionId      String
   transportistaId     String
   nombre              String
   dni                 String?   @unique
@@ -207,7 +207,7 @@ model Chofer {
   telefono            String?
   activo              Boolean   @default(true)
 
-  organizacion  Organizacion? @relation(fields: [organizacionId], references: [id])
+  organizacion  Organizacion? @relation(fields: [organizacionId], references: [id], onDelete: Restrict, onUpdate: Cascade)
   transportista Transportista @relation(fields: [transportistaId], references: [id])
 
   viajes        Viaje[]
@@ -220,7 +220,7 @@ model Chofer {
 
 model Vehiculo {
   id                String       @id @default(uuid())
-  organizacionId    String?
+  organizacionId    String
   transportistaId   String
   patente           String       @unique
   marca             String?
@@ -231,7 +231,7 @@ model Vehiculo {
   vencimientoSeguro DateTime?
   activo            Boolean      @default(true)
 
-  organizacion  Organizacion? @relation(fields: [organizacionId], references: [id])
+  organizacion  Organizacion? @relation(fields: [organizacionId], references: [id], onDelete: Restrict, onUpdate: Cascade)
   transportista Transportista @relation(fields: [transportistaId], references: [id])
 
   viajesComoCamion   Viaje[] @relation("ViajeCamion")
@@ -243,10 +243,10 @@ model Vehiculo {
 
 model Cereal {
   id             String  @id @default(uuid())
-  organizacionId String?
+  organizacionId String
   nombre         String  @unique
 
-  organizacion Organizacion? @relation(fields: [organizacionId], references: [id])
+  organizacion Organizacion? @relation(fields: [organizacionId], references: [id], onDelete: Restrict, onUpdate: Cascade)
   viajes       Viaje[]
 
   @@index([organizacionId])
@@ -255,12 +255,12 @@ model Cereal {
 
 model Ubicacion {
   id             String        @id @default(uuid())
-  organizacionId String?
+  organizacionId String
   nombre         String
   tipo           TipoUbicacion
   localidad      String?
 
-  organizacion Organizacion? @relation(fields: [organizacionId], references: [id])
+  organizacion Organizacion? @relation(fields: [organizacionId], references: [id], onDelete: Restrict, onUpdate: Cascade)
 
   viajesOrigen  Viaje[] @relation("ViajeOrigen")
   viajesDestino Viaje[] @relation("ViajeDestino")
@@ -271,11 +271,11 @@ model Ubicacion {
 
 model TipoGasto {
   id                String  @id @default(uuid())
-  organizacionId    String?
+  organizacionId    String
   nombre            String  @unique
   afectaLiquidacion Boolean @default(true)
 
-  organizacion Organizacion? @relation(fields: [organizacionId], references: [id])
+  organizacion Organizacion? @relation(fields: [organizacionId], references: [id], onDelete: Restrict, onUpdate: Cascade)
 
   anticipos   AnticipoGasto[]
   movimientos LiquidacionMovimiento[]
@@ -286,7 +286,7 @@ model TipoGasto {
 
 model Viaje {
   id                String                    @id @default(uuid())
-  organizacionId    String?
+  organizacionId    String
   numeroViaje       Int                       @default(autoincrement())
   fecha             DateTime
   cartaPorte        String
@@ -311,7 +311,7 @@ model Viaje {
   createdAt         DateTime                  @default(now())
   updatedAt         DateTime                  @updatedAt
 
-  organizacion  Organizacion?  @relation(fields: [organizacionId], references: [id])
+  organizacion  Organizacion?  @relation(fields: [organizacionId], references: [id], onDelete: Restrict, onUpdate: Cascade)
   cereal        Cereal         @relation(fields: [cerealId], references: [id])
   cliente       Cliente        @relation(fields: [clienteId], references: [id])
   productor     Productor?     @relation(fields: [productorId], references: [id])
@@ -339,14 +339,14 @@ model Viaje {
 
 model HistorialEstadoViaje {
   id             String   @id @default(uuid())
-  organizacionId String?
+  organizacionId String
   viajeId        String
   estadoAnterior String?
   estadoNuevo    String
   usuarioId      String?
   fecha          DateTime @default(now())
 
-  organizacion Organizacion? @relation(fields: [organizacionId], references: [id])
+  organizacion Organizacion? @relation(fields: [organizacionId], references: [id], onDelete: Restrict, onUpdate: Cascade)
   viaje        Viaje         @relation(fields: [viajeId], references: [id], onDelete: Cascade)
   usuario      Usuario?      @relation(fields: [usuarioId], references: [id])
 
@@ -356,7 +356,7 @@ model HistorialEstadoViaje {
 
 model AnticipoGasto {
   id              String   @id @default(uuid())
-  organizacionId  String?
+  organizacionId  String
   viajeId         String?
   choferId        String
   transportistaId String
@@ -371,7 +371,7 @@ model AnticipoGasto {
   liquidado       Boolean  @default(false)
   createdAt       DateTime @default(now())
 
-  organizacion  Organizacion? @relation(fields: [organizacionId], references: [id])
+  organizacion  Organizacion? @relation(fields: [organizacionId], references: [id], onDelete: Restrict, onUpdate: Cascade)
   viaje         Viaje?        @relation(fields: [viajeId], references: [id])
   chofer        Chofer        @relation(fields: [choferId], references: [id])
   transportista Transportista @relation(fields: [transportistaId], references: [id])
@@ -388,7 +388,7 @@ model AnticipoGasto {
 
 model Liquidacion {
   id              String                @id @default(uuid())
-  organizacionId  String?
+  organizacionId  String
   numero          Int                   @default(autoincrement())
   tipo            TipoLiquidacion
   transportistaId String?
@@ -406,7 +406,7 @@ model Liquidacion {
   createdAt       DateTime              @default(now())
   updatedAt       DateTime              @updatedAt
 
-  organizacion  Organizacion?  @relation(fields: [organizacionId], references: [id])
+  organizacion  Organizacion?  @relation(fields: [organizacionId], references: [id], onDelete: Restrict, onUpdate: Cascade)
   transportista Transportista? @relation(fields: [transportistaId], references: [id])
   chofer        Chofer?        @relation(fields: [choferId], references: [id])
   creadoPor     Usuario?       @relation("LiquidacionCreadaPor", fields: [creadoPorId], references: [id])
@@ -422,7 +422,7 @@ model Liquidacion {
 
 model LiquidacionViaje {
   id             String  @id @default(uuid())
-  organizacionId String?
+  organizacionId String
   liquidacionId  String
   viajeId        String
   subtotal       Float
@@ -430,7 +430,7 @@ model LiquidacionViaje {
   comisionMonto  Float
   totalViaje     Float
 
-  organizacion Organizacion? @relation(fields: [organizacionId], references: [id])
+  organizacion Organizacion? @relation(fields: [organizacionId], references: [id], onDelete: Restrict, onUpdate: Cascade)
   liquidacion  Liquidacion   @relation(fields: [liquidacionId], references: [id], onDelete: Cascade)
   viaje        Viaje         @relation(fields: [viajeId], references: [id])
 
@@ -441,7 +441,7 @@ model LiquidacionViaje {
 
 model LiquidacionMovimiento {
   id              String   @id @default(uuid())
-  organizacionId  String?
+  organizacionId  String
   liquidacionId   String
   viajeId         String?
   tipoGastoId     String
@@ -451,7 +451,7 @@ model LiquidacionMovimiento {
   observacion     String?
   comprobanteUrl  String?
 
-  organizacion  Organizacion?  @relation(fields: [organizacionId], references: [id])
+  organizacion  Organizacion?  @relation(fields: [organizacionId], references: [id], onDelete: Restrict, onUpdate: Cascade)
   liquidacion   Liquidacion    @relation(fields: [liquidacionId], references: [id], onDelete: Cascade)
   viaje         Viaje?         @relation(fields: [viajeId], references: [id])
   tipoGasto     TipoGasto      @relation(fields: [tipoGastoId], references: [id])
@@ -464,7 +464,7 @@ model LiquidacionMovimiento {
 
 model Factura {
   id             String            @id @default(uuid())
-  organizacionId String?
+  organizacionId String
   clienteId      String
   numero         String            @unique
   fecha          DateTime
@@ -473,7 +473,7 @@ model Factura {
   estado         EstadoFacturaEnum @default(FACTURADO)
   createdAt      DateTime          @default(now())
 
-  organizacion Organizacion? @relation(fields: [organizacionId], references: [id])
+  organizacion Organizacion? @relation(fields: [organizacionId], references: [id], onDelete: Restrict, onUpdate: Cascade)
   cliente      Cliente       @relation(fields: [clienteId], references: [id])
 
   viajes    FacturaViaje[]
@@ -487,12 +487,12 @@ model Factura {
 
 model FacturaViaje {
   id             String  @id @default(uuid())
-  organizacionId String?
+  organizacionId String
   facturaId      String
   viajeId        String
   importeViaje   Float
 
-  organizacion Organizacion? @relation(fields: [organizacionId], references: [id])
+  organizacion Organizacion? @relation(fields: [organizacionId], references: [id], onDelete: Restrict, onUpdate: Cascade)
   factura      Factura       @relation(fields: [facturaId], references: [id], onDelete: Cascade)
   viaje        Viaje         @relation(fields: [viajeId], references: [id])
 
@@ -503,7 +503,7 @@ model FacturaViaje {
 
 model Cobranza {
   id             String    @id @default(uuid())
-  organizacionId String?
+  organizacionId String
   facturaId      String
   fecha          DateTime
   importe        Float
@@ -513,7 +513,7 @@ model Cobranza {
   anuladaMotivo  String?
   anuladaFecha   DateTime?
 
-  organizacion Organizacion? @relation(fields: [organizacionId], references: [id])
+  organizacion Organizacion? @relation(fields: [organizacionId], references: [id], onDelete: Restrict, onUpdate: Cascade)
   factura      Factura       @relation(fields: [facturaId], references: [id], onDelete: Cascade)
 
   @@index([facturaId])
@@ -522,7 +522,7 @@ model Cobranza {
 
 model AuditLog {
   id              String   @id @default(uuid())
-  organizacionId  String?
+  organizacionId  String
   usuarioId       String?
   entidad         String
   entidadId       String
@@ -531,7 +531,7 @@ model AuditLog {
   datosNuevos     Json?
   fecha           DateTime @default(now())
 
-  organizacion Organizacion? @relation(fields: [organizacionId], references: [id])
+  organizacion Organizacion? @relation(fields: [organizacionId], references: [id], onDelete: Restrict, onUpdate: Cascade)
   usuario      Usuario?      @relation(fields: [usuarioId], references: [id])
 
   @@index([entidad, entidadId])
