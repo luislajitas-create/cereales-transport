@@ -1,5 +1,5 @@
 import {
-  Body, Controller, Get, Param, Patch, Post, Query, Res, UseGuards, BadRequestException, NotFoundException,
+  Body, Controller, Get, Inject, Param, Patch, Post, Query, Res, UseGuards, BadRequestException, NotFoundException,
 } from "@nestjs/common";
 import { Response } from "express";
 import * as ExcelJS from "exceljs";
@@ -8,7 +8,8 @@ import { JwtAuthGuard } from "../auth/jwt-auth.guard";
 import { RolesGuard } from "../auth/roles.guard";
 import { Roles } from "../auth/roles.decorator";
 import { CurrentUser } from "../auth/current-user.decorator";
-import { PrismaService } from "../prisma/prisma.service";
+import { ORGANIZACION_PRISMA } from "../prisma/organizacion-prisma.token";
+import { OrganizacionPrismaClient } from "../prisma/organizacion-prisma.client";
 import { CreateAnticipoDto } from "./dto/create-anticipo.dto";
 import { UpdateAnticipoDto } from "./dto/update-anticipo.dto";
 import { AnularAnticipoDto } from "./dto/anular-anticipo.dto";
@@ -28,7 +29,7 @@ const includeAnticipo = {
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller("anticipos")
 export class AnticiposController {
-  constructor(private prisma: PrismaService) {}
+  constructor(@Inject(ORGANIZACION_PRISMA) private prisma: OrganizacionPrismaClient) {}
 
   @Get()
   async findAll(

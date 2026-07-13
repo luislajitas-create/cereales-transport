@@ -1,8 +1,9 @@
-import { Body, Controller, Get, Param, Patch, Post, UseGuards } from "@nestjs/common";
+import { Body, Controller, Get, Inject, Param, Patch, Post, UseGuards } from "@nestjs/common";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
 import { RolesGuard } from "../auth/roles.guard";
 import { Roles } from "../auth/roles.decorator";
-import { PrismaService } from "../prisma/prisma.service";
+import { ORGANIZACION_PRISMA } from "../prisma/organizacion-prisma.token";
+import { OrganizacionPrismaClient } from "../prisma/organizacion-prisma.client";
 import { CreateCerealDto } from "./dto/create-cereal.dto";
 import { CreateUbicacionDto } from "./dto/create-ubicacion.dto";
 import { CreateTipoGastoDto } from "./dto/create-tipo-gasto.dto";
@@ -12,7 +13,7 @@ import { UpdateProductorDto } from "./dto/update-productor.dto";
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller("cereales")
 export class CerealesController {
-  constructor(private prisma: PrismaService) {}
+  constructor(@Inject(ORGANIZACION_PRISMA) private prisma: OrganizacionPrismaClient) {}
   @Get() findAll() { return this.prisma.cereal.findMany({ orderBy: { nombre: "asc" } }); }
   @Roles("OPERACIONES", "ADMINISTRADOR")
   @Post() create(@Body() body: CreateCerealDto) { return this.prisma.cereal.create({ data: body }); }
@@ -21,7 +22,7 @@ export class CerealesController {
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller("ubicaciones")
 export class UbicacionesController {
-  constructor(private prisma: PrismaService) {}
+  constructor(@Inject(ORGANIZACION_PRISMA) private prisma: OrganizacionPrismaClient) {}
   @Get() findAll() { return this.prisma.ubicacion.findMany({ orderBy: { nombre: "asc" } }); }
   @Roles("OPERACIONES", "ADMINISTRADOR")
   @Post() create(@Body() body: CreateUbicacionDto) { return this.prisma.ubicacion.create({ data: body }); }
@@ -30,7 +31,7 @@ export class UbicacionesController {
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller("tipos-gasto")
 export class TiposGastoController {
-  constructor(private prisma: PrismaService) {}
+  constructor(@Inject(ORGANIZACION_PRISMA) private prisma: OrganizacionPrismaClient) {}
   @Get() findAll() { return this.prisma.tipoGasto.findMany({ orderBy: { nombre: "asc" } }); }
   @Roles("OPERACIONES", "LIQUIDACIONES", "ADMINISTRADOR")
   @Post() create(@Body() body: CreateTipoGastoDto) { return this.prisma.tipoGasto.create({ data: body }); }
@@ -39,7 +40,7 @@ export class TiposGastoController {
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller("productores")
 export class ProductoresController {
-  constructor(private prisma: PrismaService) {}
+  constructor(@Inject(ORGANIZACION_PRISMA) private prisma: OrganizacionPrismaClient) {}
   @Get() findAll() { return this.prisma.productor.findMany({ orderBy: { nombre: "asc" } }); }
   @Roles("OPERACIONES", "ADMINISTRADOR")
   @Post() create(@Body() body: CreateProductorDto) { return this.prisma.productor.create({ data: body }); }
@@ -52,7 +53,7 @@ export class ProductoresController {
 @UseGuards(JwtAuthGuard)
 @Controller("usuarios")
 export class UsuariosController {
-  constructor(private prisma: PrismaService) {}
+  constructor(@Inject(ORGANIZACION_PRISMA) private prisma: OrganizacionPrismaClient) {}
   @Get() findAll() {
     return this.prisma.usuario.findMany({ select: { id: true, nombre: true, email: true, rol: true, activo: true } });
   }

@@ -1,5 +1,6 @@
-import { Injectable } from "@nestjs/common";
-import { PrismaService } from "../prisma/prisma.service";
+import { Inject, Injectable } from "@nestjs/common";
+import { ORGANIZACION_PRISMA } from "../prisma/organizacion-prisma.token";
+import { OrganizacionPrismaClient } from "../prisma/organizacion-prisma.client";
 import { calcularAging, FacturaEntrada, ResultadoAging } from "./reportes/aging.calc";
 
 // Extraído de AgingController (Bloque 7.3.4) — mismo comportamiento, misma consulta, que
@@ -8,7 +9,7 @@ import { calcularAging, FacturaEntrada, ResultadoAging } from "./reportes/aging.
 // Bloque 7.3.4.1 — fetch + mapeo de Factura→FacturaEntrada, reutilizado también por
 // AlertasService (regla 8, BLOQUE7.3.0_MOTOR_DE_INTELIGENCIA.md). `orderBy` es opcional a
 // propósito: AgingService lo necesita, AlertasService no y no debe heredarlo.
-export async function obtenerFacturasEntrada(prisma: PrismaService, where: any, orderBy?: any): Promise<FacturaEntrada[]> {
+export async function obtenerFacturasEntrada(prisma: OrganizacionPrismaClient, where: any, orderBy?: any): Promise<FacturaEntrada[]> {
   const facturas = await prisma.factura.findMany({
     where,
     select: {
@@ -43,7 +44,7 @@ export async function obtenerFacturasEntrada(prisma: PrismaService, where: any, 
 
 @Injectable()
 export class AgingService {
-  constructor(private prisma: PrismaService) {}
+  constructor(@Inject(ORGANIZACION_PRISMA) private prisma: OrganizacionPrismaClient) {}
 
   async calcular(clienteId: string | undefined, periodoDesde: Date, periodoHasta: Date, hoy: Date): Promise<ResultadoAging> {
     // Filtro de vigencia obligatorio (BLOQUE7.3.2_DISENO_AGING_COBRANZAS.md, sección 4):

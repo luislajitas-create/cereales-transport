@@ -1,0 +1,1 @@
+export const ORGANIZACION_PRISMA = Symbol("ORGANIZACION_PRISMA");

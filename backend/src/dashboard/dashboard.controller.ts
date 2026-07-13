@@ -1,11 +1,12 @@
-import { Controller, Get, UseGuards } from "@nestjs/common";
+import { Controller, Get, Inject, UseGuards } from "@nestjs/common";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
-import { PrismaService } from "../prisma/prisma.service";
+import { ORGANIZACION_PRISMA } from "../prisma/organizacion-prisma.token";
+import { OrganizacionPrismaClient } from "../prisma/organizacion-prisma.client";
 
 @UseGuards(JwtAuthGuard)
 @Controller("dashboard")
 export class DashboardController {
-  constructor(private prisma: PrismaService) {}
+  constructor(@Inject(ORGANIZACION_PRISMA) private prisma: OrganizacionPrismaClient) {}
 
   @Get("resumen")
   async resumen() {

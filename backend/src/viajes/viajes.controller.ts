@@ -1,11 +1,12 @@
 import {
-  Body, Controller, Get, Param, Patch, Post, Query, UseGuards, BadRequestException, NotFoundException,
+  Body, Controller, Get, Inject, Param, Patch, Post, Query, UseGuards, BadRequestException, NotFoundException,
 } from "@nestjs/common";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
 import { RolesGuard } from "../auth/roles.guard";
 import { Roles } from "../auth/roles.decorator";
 import { CurrentUser } from "../auth/current-user.decorator";
-import { PrismaService } from "../prisma/prisma.service";
+import { ORGANIZACION_PRISMA } from "../prisma/organizacion-prisma.token";
+import { OrganizacionPrismaClient } from "../prisma/organizacion-prisma.client";
 import { CreateViajeDto } from "./dto/create-viaje.dto";
 import { UpdateViajeDto } from "./dto/update-viaje.dto";
 import { CambiarEstadoDto } from "./dto/cambiar-estado.dto";
@@ -77,7 +78,7 @@ function agregarBloqueoSiCorresponde(
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller("viajes")
 export class ViajesController {
-  constructor(private prisma: PrismaService) {}
+  constructor(@Inject(ORGANIZACION_PRISMA) private prisma: OrganizacionPrismaClient) {}
 
   @Get()
   async findAll(

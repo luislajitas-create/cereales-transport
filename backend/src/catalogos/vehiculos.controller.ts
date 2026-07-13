@@ -1,15 +1,16 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Query, UseGuards } from "@nestjs/common";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
 import { RolesGuard } from "../auth/roles.guard";
 import { Roles } from "../auth/roles.decorator";
-import { PrismaService } from "../prisma/prisma.service";
+import { ORGANIZACION_PRISMA } from "../prisma/organizacion-prisma.token";
+import { OrganizacionPrismaClient } from "../prisma/organizacion-prisma.client";
 import { CreateVehiculoDto } from "./dto/create-vehiculo.dto";
 import { UpdateVehiculoDto } from "./dto/update-vehiculo.dto";
 
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller("vehiculos")
 export class VehiculosController {
-  constructor(private prisma: PrismaService) {}
+  constructor(@Inject(ORGANIZACION_PRISMA) private prisma: OrganizacionPrismaClient) {}
 
   @Get()
   findAll(

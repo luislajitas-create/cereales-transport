@@ -1,5 +1,6 @@
-import { Injectable } from "@nestjs/common";
-import { PrismaService } from "../prisma/prisma.service";
+import { Inject, Injectable } from "@nestjs/common";
+import { ORGANIZACION_PRISMA } from "../prisma/organizacion-prisma.token";
+import { OrganizacionPrismaClient } from "../prisma/organizacion-prisma.client";
 import { calcularRentabilidad, ViajeEntrada, ResultadoRentabilidad } from "./reportes/rentabilidad.calc";
 
 // Extraído de InteligenciaController (Bloque 7.3.4) para que Dashboard Ejecutivo pueda
@@ -14,7 +15,7 @@ import { calcularRentabilidad, ViajeEntrada, ResultadoRentabilidad } from "./rep
 // datos, sino en viajesIncompletos (calculado por reportes/rentabilidad.calc.ts). `orderBy`
 // es opcional a propósito: RentabilidadService lo necesita, AlertasService no y no debe
 // heredarlo.
-export async function obtenerViajesEntrada(prisma: PrismaService, where: any, orderBy?: any): Promise<ViajeEntrada[]> {
+export async function obtenerViajesEntrada(prisma: OrganizacionPrismaClient, where: any, orderBy?: any): Promise<ViajeEntrada[]> {
   const viajes = await prisma.viaje.findMany({
     where,
     select: {
@@ -64,7 +65,7 @@ export async function obtenerViajesEntrada(prisma: PrismaService, where: any, or
 
 @Injectable()
 export class RentabilidadService {
-  constructor(private prisma: PrismaService) {}
+  constructor(@Inject(ORGANIZACION_PRISMA) private prisma: OrganizacionPrismaClient) {}
 
   async calcular(fechaDesde: Date, fechaHasta: Date, clienteId?: string, transportistaId?: string): Promise<ResultadoRentabilidad> {
     const where: any = {

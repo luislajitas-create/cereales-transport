@@ -1,5 +1,6 @@
-import { Injectable } from "@nestjs/common";
-import { PrismaService } from "../prisma/prisma.service";
+import { Inject, Injectable } from "@nestjs/common";
+import { ORGANIZACION_PRISMA } from "../prisma/organizacion-prisma.token";
+import { OrganizacionPrismaClient } from "../prisma/organizacion-prisma.client";
 import { obtenerFacturasEntrada } from "./aging.service";
 import { obtenerViajesEntrada } from "./rentabilidad.service";
 import { calcularAging } from "./reportes/aging.calc";
@@ -19,7 +20,7 @@ import { hoyNormalizado } from "./shared/fecha";
 // llaman sin `orderBy` a propósito, igual que antes: acá no importa el orden de fetch.
 @Injectable()
 export class AlertasService {
-  constructor(private prisma: PrismaService) {}
+  constructor(@Inject(ORGANIZACION_PRISMA) private prisma: OrganizacionPrismaClient) {}
 
   async calcular(): Promise<ResultadoAlertas> {
     const hoy = hoyNormalizado();
