@@ -1,6 +1,7 @@
 import { Prisma } from "@prisma/client";
 import { PrismaService } from "./prisma.service";
 import { esModeloOrganizacional } from "./organizacional-models";
+import { obtenerOrganizacionIdActual } from "./organizacion-context";
 
 // Mecanismo único de aislamiento por organización (Bloque 8.1.d). Base arquitectónica: spike
 // técnico aprobado — Prisma Client Extensions cubre de forma segura y verificada las 14
@@ -11,6 +12,11 @@ import { esModeloOrganizacional } from "./organizacional-models";
 // — por eso esta capa rechaza explícitamente cualquier escritura anidada sobre un modelo
 // organizacional en vez de dejarla pasar sin protección (falla segura), y el cliente scopeado
 // no expone $queryRaw/$queryRawUnsafe/$executeRaw/$executeRawUnsafe en su tipo público.
+//
+// Refinación arquitectónica (revisión aprobada): el cliente ya no recibe organizacionId por
+// closure ni depende de un Provider request-scoped — es un singleton construido una sola vez
+// al arrancar la app. Cada handler lee el contexto organizacional desde AsyncLocalStorage
+// (organizacion-context.ts) en el momento exacto en que se ejecuta cada query, nunca antes.
 //
 // `args`/`query` se tipan `any` deliberadamente: $allModels es, por diseño de Prisma, una
 // unión de los WhereInput/CreateInput/etc. de los 20 modelos — no hay forma de tipar esto de
@@ -41,38 +47,44 @@ function asegurarSinEscrituraAnidada(data: unknown, operacion: string) {
   }
 }
 
-export function crearClienteOrganizacional(prisma: PrismaService, organizacionId: string) {
+export function crearClienteOrganizacional(prisma: PrismaService) {
   return prisma.$extends({
     name: "organizacion-scope",
     query: {
       $allModels: {
         async findMany({ model, args, query }: ArgsExtension) {
           if (!esModeloOrganizacional(model)) return query(args);
+          const organizacionId = obtenerOrganizacionIdActual();
           args.where = { AND: [args.where ?? {}, { organizacionId }] };
           return query(args);
         },
         async findFirst({ model, args, query }: ArgsExtension) {
           if (!esModeloOrganizacional(model)) return query(args);
+          const organizacionId = obtenerOrganizacionIdActual();
           args.where = { AND: [args.where ?? {}, { organizacionId }] };
           return query(args);
         },
         async count({ model, args, query }: ArgsExtension) {
           if (!esModeloOrganizacional(model)) return query(args);
+          const organizacionId = obtenerOrganizacionIdActual();
           args.where = { AND: [args.where ?? {}, { organizacionId }] };
           return query(args);
         },
         async aggregate({ model, args, query }: ArgsExtension) {
           if (!esModeloOrganizacional(model)) return query(args);
+          const organizacionId = obtenerOrganizacionIdActual();
           args.where = { AND: [args.where ?? {}, { organizacionId }] };
           return query(args);
         },
         async groupBy({ model, args, query }: ArgsExtension) {
           if (!esModeloOrganizacional(model)) return query(args);
+          const organizacionId = obtenerOrganizacionIdActual();
           args.where = { AND: [args.where ?? {}, { organizacionId }] };
           return query(args);
         },
         async findUnique({ model, args, query }: ArgsExtension) {
           if (!esModeloOrganizacional(model)) return query(args);
+          const organizacionId = obtenerOrganizacionIdActual();
           const argsConOrg = { ...args };
           let quitarOrganizacionId = false;
           if (argsConOrg.select && !argsConOrg.select.organizacionId) {
@@ -87,6 +99,7 @@ export function crearClienteOrganizacional(prisma: PrismaService, organizacionId
         },
         async findUniqueOrThrow({ model, args, query }: ArgsExtension) {
           if (!esModeloOrganizacional(model)) return query(args);
+          const organizacionId = obtenerOrganizacionIdActual();
           const argsConOrg = { ...args };
           let quitarOrganizacionId = false;
           if (argsConOrg.select && !argsConOrg.select.organizacionId) {
@@ -105,12 +118,14 @@ export function crearClienteOrganizacional(prisma: PrismaService, organizacionId
         },
         async create({ model, args, query }: ArgsExtension) {
           if (!esModeloOrganizacional(model)) return query(args);
+          const organizacionId = obtenerOrganizacionIdActual();
           asegurarSinEscrituraAnidada(args.data, `${model}.create`);
           args.data = { ...args.data, organizacionId };
           return query(args);
         },
         async createMany({ model, args, query }: ArgsExtension) {
           if (!esModeloOrganizacional(model)) return query(args);
+          const organizacionId = obtenerOrganizacionIdActual();
           if (Array.isArray(args.data)) {
             args.data.forEach((d: unknown) => asegurarSinEscrituraAnidada(d, `${model}.createMany`));
             args.data = args.data.map((d: any) => ({ ...d, organizacionId }));
@@ -119,17 +134,20 @@ export function crearClienteOrganizacional(prisma: PrismaService, organizacionId
         },
         async update({ model, args, query }: ArgsExtension) {
           if (!esModeloOrganizacional(model)) return query(args);
+          const organizacionId = obtenerOrganizacionIdActual();
           asegurarSinEscrituraAnidada(args.data, `${model}.update`);
           args.where = { ...args.where, organizacionId };
           return query(args);
         },
         async updateMany({ model, args, query }: ArgsExtension) {
           if (!esModeloOrganizacional(model)) return query(args);
+          const organizacionId = obtenerOrganizacionIdActual();
           args.where = { AND: [args.where ?? {}, { organizacionId }] };
           return query(args);
         },
         async upsert({ model, args, query }: ArgsExtension) {
           if (!esModeloOrganizacional(model)) return query(args);
+          const organizacionId = obtenerOrganizacionIdActual();
           asegurarSinEscrituraAnidada(args.create, `${model}.upsert (create)`);
           asegurarSinEscrituraAnidada(args.update, `${model}.upsert (update)`);
           args.where = { ...args.where, organizacionId };
@@ -138,11 +156,13 @@ export function crearClienteOrganizacional(prisma: PrismaService, organizacionId
         },
         async delete({ model, args, query }: ArgsExtension) {
           if (!esModeloOrganizacional(model)) return query(args);
+          const organizacionId = obtenerOrganizacionIdActual();
           args.where = { ...args.where, organizacionId };
           return query(args);
         },
         async deleteMany({ model, args, query }: ArgsExtension) {
           if (!esModeloOrganizacional(model)) return query(args);
+          const organizacionId = obtenerOrganizacionIdActual();
           args.where = { AND: [args.where ?? {}, { organizacionId }] };
           return query(args);
         },
