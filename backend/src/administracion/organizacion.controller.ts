@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Inject, Patch, UseGuards } from "@nestjs/common";
+import { Body, Controller, Get, Inject, Patch, Query, UseGuards } from "@nestjs/common";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
 import { RolesGuard } from "../auth/roles.guard";
 import { Roles } from "../auth/roles.decorator";
@@ -6,6 +6,9 @@ import { CurrentUser } from "../auth/current-user.decorator";
 import { ORGANIZACION_PRISMA } from "../prisma/organizacion-prisma.token";
 import { OrganizacionPrismaClient } from "../prisma/organizacion-prisma.client";
 import { UpdateOrganizacionDto } from "./dto/update-organizacion.dto";
+
+const AUDITORIA_LIMITE_DEFECTO = 20;
+const AUDITORIA_LIMITE_MAXIMO = 100;
 
 const SELECT_ORGANIZACION = {
   id: true,
@@ -64,5 +67,59 @@ export class OrganizacionController {
     });
 
     return actualizada;
+  }
+
+  // Bloque 9.5 (consulta) — auditLog es un modelo organizacional: el aislamiento por
+  // organizacionId lo aplica ORGANIZACION_PRISMA automáticamente (organizacion-prisma.client.ts)
+  // sobre CUALQUIER where que se le pase, incluidos los filtros de abajo — por eso alcanza con
+  // construir el where con los filtros solicitados, sin agregar organizacionId acá (sería un
+  // filtro duplicado). Esto es lo que garantiza que un usuarioId o entidadId de otra
+  // organización nunca devuelva resultados, aunque coincida con un id real de otra org.
+  @Roles("ADMINISTRADOR")
+  @Get("auditoria")
+  async auditoria(
+    @Query("usuarioId") usuarioId?: string,
+    @Query("entidad") entidad?: string,
+    @Query("entidadId") entidadId?: string,
+    @Query("accion") accion?: string,
+    @Query("fechaDesde") fechaDesde?: string,
+    @Query("fechaHasta") fechaHasta?: string,
+    @Query("page") pageRaw?: string,
+    @Query("limit") limitRaw?: string,
+  ) {
+    const where: any = {};
+    if (usuarioId) where.usuarioId = usuarioId;
+    if (entidad) where.entidad = entidad;
+    if (entidadId) where.entidadId = entidadId;
+    if (accion) where.accion = accion;
+    if (fechaDesde || fechaHasta) {
+      where.fecha = {};
+      if (fechaDesde) where.fecha.gte = new Date(fechaDesde);
+      if (fechaHasta) where.fecha.lte = new Date(fechaHasta);
+    }
+
+    const page = Math.max(1, parseInt(pageRaw ?? "", 10) || 1);
+    const limit = Math.min(AUDITORIA_LIMITE_MAXIMO, Math.max(1, parseInt(limitRaw ?? "", 10) || AUDITORIA_LIMITE_DEFECTO));
+
+    const [total, datos] = await Promise.all([
+      this.prisma.auditLog.count({ where }),
+      this.prisma.auditLog.findMany({
+        where,
+        orderBy: { fecha: "desc" },
+        skip: (page - 1) * limit,
+        take: limit,
+        select: {
+          id: true,
+          fecha: true,
+          accion: true,
+          entidad: true,
+          entidadId: true,
+          usuarioId: true,
+          usuario: { select: { nombre: true, email: true, rol: true } },
+        },
+      }),
+    ]);
+
+    return { datos, pagina: page, limite: limit, total };
   }
 }
