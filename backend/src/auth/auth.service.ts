@@ -2,13 +2,15 @@ import { BadRequestException, ForbiddenException, Injectable, UnauthorizedExcept
 import { JwtService } from "@nestjs/jwt";
 import * as bcrypt from "bcryptjs";
 import { PrismaService } from "../prisma/prisma.service";
-import { hashearToken } from "../administracion/token-utils";
+import { generarTokenSeguro, hashearToken } from "../administracion/token-utils";
+import { NotificadorService } from "../notificaciones/notificador.service";
 
 const ENLACE_INVALIDO = "El enlace no es válido o ya expiró.";
+const TOKEN_RECUPERACION_VIGENCIA_MS = 60 * 60 * 1000; // 60 minutos, mismo criterio que 9.1
 
 @Injectable()
 export class AuthService {
-  constructor(private prisma: PrismaService, private jwt: JwtService) {}
+  constructor(private prisma: PrismaService, private jwt: JwtService, private notificador: NotificadorService) {}
 
   async login(email: string, password: string) {
     const usuario = await this.prisma.usuario.findUnique({ where: { email } });
@@ -35,6 +37,38 @@ export class AuthService {
         organizacionId: usuario.organizacionId,
       },
     };
+  }
+
+  // Bloque 9.3 — solicitud de recuperación. Siempre resuelve sin error y sin distinguir si el
+  // email existe (BLOQUE9_DISENO_ADMINISTRACION.md, sección 5) — el controller responde el mismo
+  // mensaje genérico en ambos casos. Solo si el usuario existe y está activo se genera el token
+  // y se registra el AuditLog; nunca se revela esa condición a quien hizo la solicitud.
+  async recuperarContrasena(email: string): Promise<void> {
+    const usuario = await this.prisma.usuario.findUnique({ where: { email } });
+    if (!usuario || !usuario.activo) return;
+
+    const { token, tokenHash } = generarTokenSeguro();
+    await this.prisma.passwordResetToken.create({
+      data: {
+        organizacionId: usuario.organizacionId,
+        usuarioId: usuario.id,
+        tokenHash,
+        expiresAt: new Date(Date.now() + TOKEN_RECUPERACION_VIGENCIA_MS),
+      },
+    });
+
+    await this.prisma.auditLog.create({
+      data: {
+        organizacionId: usuario.organizacionId,
+        usuarioId: usuario.id,
+        entidad: "Usuario",
+        entidadId: usuario.id,
+        accion: "recuperacion_contrasena_solicitada",
+      },
+    });
+
+    const enlace = `${process.env.CORS_ORIGIN}/restablecer-contrasena?token=${token}`;
+    await this.notificador.enviarRecuperacionContrasena(usuario.email, enlace);
   }
 
   // Bloque 9.1/9.3 — canje de un token de activación/recuperación. Usa el cliente crudo de
