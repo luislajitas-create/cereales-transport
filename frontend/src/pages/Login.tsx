@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 
 export default function Login() {
@@ -40,6 +40,7 @@ export default function Login() {
         <button type="submit" disabled={loading}>
           {loading ? "Ingresando..." : "Ingresar"}
         </button>
+        <p className="login-hint"><Link to="/recuperar-contrasena">¿Olvidaste tu contraseña?</Link></p>
       </form>
     </div>
   );

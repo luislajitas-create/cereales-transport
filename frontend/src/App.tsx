@@ -20,12 +20,16 @@ import DashboardEjecutivo from "./pages/DashboardEjecutivo";
 import Benchmarking from "./pages/Benchmarking";
 import Perfil from "./pages/Perfil";
 import Organizacion from "./pages/Organizacion";
+import RecuperarContrasena from "./pages/RecuperarContrasena";
+import RestablecerContrasena from "./pages/RestablecerContrasena";
 
 export default function App() {
   return (
     <ConfirmProvider>
       <Routes>
         <Route path="/login" element={<Login />} />
+        <Route path="/recuperar-contrasena" element={<RecuperarContrasena />} />
+        <Route path="/restablecer-contrasena" element={<RestablecerContrasena />} />
         <Route element={<Layout />}>
           <Route path="/" element={<Dashboard />} />
           <Route path="/viajes" element={<Viajes />} />
