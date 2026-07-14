@@ -78,9 +78,16 @@ enum EstadoFacturaEnum {
 // Campos mínimos para identificar una empresa — sin configuración comercial, moneda,
 // branding, planes ni límites todavía (fuera de alcance de esta etapa).
 model Organizacion {
-  id        String   @id @default(uuid())
-  nombre    String
-  createdAt DateTime @default(now())
+  id          String   @id @default(uuid())
+  nombre      String
+  razonSocial String?
+  cuit        String?  @unique
+  domicilio   String?
+  telefono    String?
+  email       String?
+  zonaHoraria String?
+  moneda      String?
+  createdAt   DateTime @default(now())
 
   usuarios               Usuario[]
   clientes               Cliente[]
