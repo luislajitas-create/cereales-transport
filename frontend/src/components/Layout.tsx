@@ -17,6 +17,7 @@ const NAV_ITEMS = [
   { to: "/transportistas", label: "Transportistas", roles: null },
   { to: "/catalogos", label: "Catálogos", roles: ["ADMINISTRADOR", "OPERACIONES"] },
   { to: "/organizacion", label: "Mi Organización", roles: null },
+  { to: "/administracion/usuarios", label: "Usuarios", roles: ["ADMINISTRADOR"] },
 ];
 
 export default function Layout() {

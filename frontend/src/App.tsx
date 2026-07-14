@@ -23,6 +23,7 @@ import Organizacion from "./pages/Organizacion";
 import RecuperarContrasena from "./pages/RecuperarContrasena";
 import RestablecerContrasena from "./pages/RestablecerContrasena";
 import AceptarInvitacion from "./pages/AceptarInvitacion";
+import Usuarios from "./pages/Usuarios";
 
 export default function App() {
   return (
@@ -51,6 +52,7 @@ export default function App() {
           <Route path="/inteligencia/benchmarking" element={<Benchmarking />} />
           <Route path="/perfil" element={<Perfil />} />
           <Route path="/organizacion" element={<Organizacion />} />
+          <Route path="/administracion/usuarios" element={<Usuarios />} />
         </Route>
       </Routes>
     </ConfirmProvider>
