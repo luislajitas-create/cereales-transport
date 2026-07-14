@@ -24,6 +24,7 @@ import RecuperarContrasena from "./pages/RecuperarContrasena";
 import RestablecerContrasena from "./pages/RestablecerContrasena";
 import AceptarInvitacion from "./pages/AceptarInvitacion";
 import Usuarios from "./pages/Usuarios";
+import AuditoriaAdministrativa from "./pages/AuditoriaAdministrativa";
 
 export default function App() {
   return (
@@ -53,6 +54,7 @@ export default function App() {
           <Route path="/perfil" element={<Perfil />} />
           <Route path="/organizacion" element={<Organizacion />} />
           <Route path="/administracion/usuarios" element={<Usuarios />} />
+          <Route path="/administracion/auditoria" element={<AuditoriaAdministrativa />} />
         </Route>
       </Routes>
     </ConfirmProvider>
