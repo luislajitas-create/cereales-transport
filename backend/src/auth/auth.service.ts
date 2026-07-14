@@ -103,4 +103,71 @@ export class AuthService {
       }),
     ]);
   }
+
+  // Bloque 9.6 (mitad pública) — datos mínimos para el formulario de aceptación
+  // (BLOQUE9_DISENO_ADMINISTRACION.md, sección 5): nombre de la organización y el email de la
+  // invitación, nada más.
+  async obtenerInvitacion(token: string) {
+    const invitacion = await this.buscarInvitacionValida(token);
+    const organizacion = await this.prisma.organizacion.findUnique({
+      where: { id: invitacion.organizacionId },
+      select: { nombre: true },
+    });
+    return { organizacion: organizacion?.nombre ?? null, email: invitacion.email };
+  }
+
+  // Bloque 9.6 — el Usuario real se crea acá, recién al aceptar, nunca antes (sección 5,
+  // "Decisión recomendada"). Todo dentro de una transacción: si dos invitaciones a distintas
+  // organizaciones llegaran a competir por el mismo email, la unicidad global de Usuario.email
+  // (schema.prisma) rechaza la segunda con P2002 (mapeado a 409 por PrismaExceptionFilter) —
+  // el check explícito de abajo solo mejora el mensaje en el caso común, no reemplaza esa garantía.
+  async aceptarInvitacion(token: string, nuevaContrasena: string): Promise<void> {
+    const invitacion = await this.buscarInvitacionValida(token);
+    const passwordHash = await bcrypt.hash(nuevaContrasena, 10);
+
+    await this.prisma.$transaction(async (tx) => {
+      const emailYaUsado = await tx.usuario.findUnique({ where: { email: invitacion.email } });
+      if (emailYaUsado) {
+        throw new BadRequestException("Ya existe una cuenta con ese email. Iniciá sesión o recuperá tu acceso.");
+      }
+
+      const usuario = await tx.usuario.create({
+        data: {
+          organizacionId: invitacion.organizacionId,
+          nombre: invitacion.nombre,
+          email: invitacion.email,
+          rol: invitacion.rol,
+          activo: true,
+          passwordHash,
+        },
+      });
+
+      await tx.invitacionUsuario.update({ where: { id: invitacion.id }, data: { aceptadaEn: new Date() } });
+
+      // Cualquier otra invitación pendiente para el mismo email (de cualquier organización)
+      // queda sin efecto: ya existe una cuenta real, no hay nada más que aceptar.
+      await tx.invitacionUsuario.deleteMany({
+        where: { email: invitacion.email, aceptadaEn: null, id: { not: invitacion.id } },
+      });
+
+      await tx.auditLog.create({
+        data: {
+          organizacionId: invitacion.organizacionId,
+          usuarioId: usuario.id,
+          entidad: "Usuario",
+          entidadId: usuario.id,
+          accion: "invitacion_aceptada",
+        },
+      });
+    });
+  }
+
+  private async buscarInvitacionValida(token: string) {
+    const tokenHash = hashearToken(token);
+    const invitacion = await this.prisma.invitacionUsuario.findUnique({ where: { tokenHash } });
+    if (!invitacion || invitacion.aceptadaEn || invitacion.expiresAt < new Date()) {
+      throw new BadRequestException(ENLACE_INVALIDO);
+    }
+    return invitacion;
+  }
 }

@@ -175,7 +175,7 @@ type NombrePropiedadModeloOrganizacional =
   | "usuario" | "cliente" | "contacto" | "productor" | "transportista" | "chofer" | "vehiculo"
   | "cereal" | "ubicacion" | "tipoGasto" | "viaje" | "historialEstadoViaje" | "anticipoGasto"
   | "liquidacion" | "liquidacionViaje" | "liquidacionMovimiento" | "factura" | "facturaViaje"
-  | "cobranza" | "auditLog" | "passwordResetToken";
+  | "cobranza" | "auditLog" | "passwordResetToken" | "invitacionUsuario";
 
 type MetodosDeLecturaSinCambios<T> = Pick<
   T,

@@ -18,6 +18,7 @@ import { Roles } from "../auth/roles.decorator";
 import { CurrentUser } from "../auth/current-user.decorator";
 import { ORGANIZACION_PRISMA } from "../prisma/organizacion-prisma.token";
 import { OrganizacionPrismaClient } from "../prisma/organizacion-prisma.client";
+import { NotificadorService } from "../notificaciones/notificador.service";
 import { generarTokenSeguro } from "./token-utils";
 import { CreateUsuarioDto } from "./dto/create-usuario.dto";
 import { UpdateUsuarioDto } from "./dto/update-usuario.dto";
@@ -28,7 +29,10 @@ const TOKEN_ACTIVACION_VIGENCIA_MS = 60 * 60 * 1000; // 60 minutos
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller("usuarios")
 export class UsuariosController {
-  constructor(@Inject(ORGANIZACION_PRISMA) private prisma: OrganizacionPrismaClient) {}
+  constructor(
+    @Inject(ORGANIZACION_PRISMA) private prisma: OrganizacionPrismaClient,
+    private notificador: NotificadorService,
+  ) {}
 
   @Get()
   findAll() {
@@ -79,6 +83,55 @@ export class UsuariosController {
       },
       tokenActivacion: token,
     };
+  }
+
+  // Bloque 9.6 — invita a alguien que todavía no es Usuario. El Usuario real se crea recién al
+  // aceptar la invitación (auth.service.ts, aceptarInvitacion), nunca acá — evita que una
+  // invitación nunca aceptada bloquee un email (único global en Usuario) para otra organización
+  // (BLOQUE9_DISENO_ADMINISTRACION.md, sección 5, "Decisión recomendada").
+  @Roles("ADMINISTRADOR")
+  @Post("invitaciones")
+  async invitar(@Body() body: CreateUsuarioDto, @CurrentUser() actor: any) {
+    const usuarioExistente = await this.prisma.usuario.findFirst({ where: { email: body.email } });
+    if (usuarioExistente) {
+      throw new BadRequestException("Ya existe un usuario con ese email en esta organización.");
+    }
+
+    // Invitación repetida al mismo email pendiente: se invalida la anterior y se emite una
+    // nueva, en vez de crear un duplicado (también cubre el caso de reenvío).
+    const invitacionPendiente = await this.prisma.invitacionUsuario.findFirst({
+      where: { email: body.email, aceptadaEn: null },
+    });
+    if (invitacionPendiente) {
+      await this.prisma.invitacionUsuario.delete({ where: { id: invitacionPendiente.id } });
+    }
+
+    const { token, tokenHash } = generarTokenSeguro();
+    const invitacion = await this.prisma.invitacionUsuario.create({
+      data: {
+        email: body.email,
+        nombre: body.nombre,
+        rol: body.rol,
+        tokenHash,
+        expiresAt: new Date(Date.now() + TOKEN_ACTIVACION_VIGENCIA_MS),
+        creadaPorId: actor.id,
+      },
+    });
+
+    await this.prisma.auditLog.create({
+      data: {
+        usuarioId: actor.id,
+        entidad: "Usuario",
+        entidadId: invitacion.id,
+        accion: "invitacion_creada",
+        datosNuevos: { email: body.email, nombre: body.nombre, rol: body.rol },
+      },
+    });
+
+    const enlace = `${process.env.CORS_ORIGIN}/aceptar-invitacion?token=${token}`;
+    await this.notificador.enviarInvitacionUsuario(body.email, enlace);
+
+    return { message: "Invitación enviada correctamente." };
   }
 
   @Roles("ADMINISTRADOR")

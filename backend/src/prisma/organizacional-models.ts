@@ -24,6 +24,7 @@ export const ORGANIZACIONAL_MODELS = [
   "Cobranza",
   "AuditLog",
   "PasswordResetToken",
+  "InvitacionUsuario",
 ] as const;
 
 export function esModeloOrganizacional(model: string | undefined): boolean {

@@ -110,6 +110,7 @@ model Organizacion {
   cobranzas              Cobranza[]
   auditLogs              AuditLog[]
   passwordResetTokens    PasswordResetToken[]
+  invitacionesUsuario    InvitacionUsuario[]
 }
 
 model Usuario {
@@ -130,6 +131,7 @@ model Usuario {
   liquidacionesCreadas Liquidacion[]          @relation("LiquidacionCreadaPor")
   auditLogs            AuditLog[]
   passwordResetTokens  PasswordResetToken[]
+  invitacionesCreadas  InvitacionUsuario[]
 
   @@index([organizacionId])
   @@unique([id, organizacionId])
@@ -156,6 +158,30 @@ model PasswordResetToken {
 
   @@index([organizacionId])
   @@index([usuarioId])
+}
+
+// Bloque 9.6 — invitación de un usuario que todavía no existe. Modelo separado de
+// PasswordResetToken a propósito (BLOQUE9_DISENO_ADMINISTRACION.md, sección 4): ese modelo
+// exige una FK obligatoria a un Usuario ya existente, y acá todavía no hay ninguno — el Usuario
+// real se crea recién al aceptar (sección 5, "Decisión recomendada"), nunca antes, precisamente
+// para no dejar bloqueado un email (único global en Usuario) por una invitación nunca aceptada.
+model InvitacionUsuario {
+  id             String    @id @default(uuid())
+  organizacionId String
+  email          String
+  nombre         String
+  rol            RolNombre
+  tokenHash      String    @unique
+  expiresAt      DateTime
+  aceptadaEn     DateTime?
+  creadaPorId    String
+  createdAt      DateTime  @default(now())
+
+  organizacion Organizacion? @relation(fields: [organizacionId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  creadaPor    Usuario       @relation(fields: [creadaPorId, organizacionId], references: [id, organizacionId], onDelete: Restrict, onUpdate: Cascade)
+
+  @@index([organizacionId])
+  @@index([email])
 }
 
 model Cliente {

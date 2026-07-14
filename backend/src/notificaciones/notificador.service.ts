@@ -17,4 +17,14 @@ export class NotificadorService {
     }
     this.logger.log(`[dev] Enlace de recuperación de contraseña para ${destinatario}: ${enlace}`);
   }
+
+  // Bloque 9.6 — mismo criterio que enviarRecuperacionContrasena: el enlace contiene un token de
+  // un solo uso, nunca se escribe en logs de producción.
+  async enviarInvitacionUsuario(destinatario: string, enlace: string): Promise<void> {
+    if (process.env.NODE_ENV === "production") {
+      this.logger.log(`Invitación generada para ${destinatario} (proveedor de envío aún no configurado)`);
+      return;
+    }
+    this.logger.log(`[dev] Enlace de invitación para ${destinatario}: ${enlace}`);
+  }
 }
