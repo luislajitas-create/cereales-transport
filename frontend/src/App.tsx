@@ -18,6 +18,8 @@ import Aging from "./pages/Aging";
 import Alertas from "./pages/Alertas";
 import DashboardEjecutivo from "./pages/DashboardEjecutivo";
 import Benchmarking from "./pages/Benchmarking";
+import Perfil from "./pages/Perfil";
+import Organizacion from "./pages/Organizacion";
 
 export default function App() {
   return (
@@ -41,6 +43,8 @@ export default function App() {
           <Route path="/inteligencia/alertas" element={<Alertas />} />
           <Route path="/inteligencia/dashboard" element={<DashboardEjecutivo />} />
           <Route path="/inteligencia/benchmarking" element={<Benchmarking />} />
+          <Route path="/perfil" element={<Perfil />} />
+          <Route path="/organizacion" element={<Organizacion />} />
         </Route>
       </Routes>
     </ConfirmProvider>

@@ -16,6 +16,7 @@ const NAV_ITEMS = [
   { to: "/clientes", label: "Clientes", roles: null },
   { to: "/transportistas", label: "Transportistas", roles: null },
   { to: "/catalogos", label: "Catálogos", roles: ["ADMINISTRADOR", "OPERACIONES"] },
+  { to: "/organizacion", label: "Mi Organización", roles: null },
 ];
 
 export default function Layout() {
@@ -40,6 +41,7 @@ export default function Layout() {
         <div className="user-info">
           <div>{usuario.nombre}</div>
           <div className="muted">{usuario.rol}</div>
+          <NavLink to="/perfil">Mi perfil</NavLink>
           <button onClick={logout}>Cerrar sesión</button>
         </div>
       </aside>
