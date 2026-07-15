@@ -73,21 +73,39 @@ enum EstadoFacturaEnum {
   ANULADO
 }
 
+// Bloque 10.1 — nivel opcional por encima de Organizacion, para representar un grupo
+// económico que opera con más de un CUIT. Ver GRUPO_ECONOMICO_DISENO_TECNICO.md, sección 10.
+// No es un modelo organizacional (no tiene organizacionId, no vive en ORGANIZACIONAL_MODELS)
+// — mismo tratamiento que Organizacion misma: aislamiento manual, nunca por la extensión de
+// Prisma. Una Organizacion pertenece, como máximo, a un GrupoEconomico (relación opcional).
+model GrupoEconomico {
+  id        String   @id @default(uuid())
+  nombre    String
+  createdAt DateTime @default(now())
+
+  organizaciones Organizacion[]
+}
+
 // Bloque 8.1.b, Etapa 1 (Schema inicial) — fundamento del modelo multiempresa.
 // Ver BLOQUE8.1_DISENO_MULTIEMPRESA.md y BLOQUE8.1_PLAN_IMPLEMENTACION_MULTIEMPRESA.md.
 // Campos mínimos para identificar una empresa — sin configuración comercial, moneda,
 // branding, planes ni límites todavía (fuera de alcance de esta etapa).
 model Organizacion {
-  id          String   @id @default(uuid())
-  nombre      String
-  razonSocial String?
-  cuit        String?  @unique
-  domicilio   String?
-  telefono    String?
-  email       String?
-  zonaHoraria String?
-  moneda      String?
-  createdAt   DateTime @default(now())
+  id               String   @id @default(uuid())
+  nombre           String
+  razonSocial      String?
+  cuit             String?  @unique
+  domicilio        String?
+  telefono         String?
+  email            String?
+  zonaHoraria      String?
+  moneda           String?
+  // Bloque 10.1 — opcional y nulo por defecto: una organización sin grupo asignado sigue
+  // funcionando exactamente igual que en v1.0 (GRUPO_ECONOMICO_DISENO_TECNICO.md, sección 1).
+  grupoEconomicoId String?
+  createdAt        DateTime @default(now())
+
+  grupoEconomico GrupoEconomico? @relation(fields: [grupoEconomicoId], references: [id], onDelete: Restrict, onUpdate: Cascade)
 
   usuarios               Usuario[]
   clientes               Cliente[]
@@ -111,6 +129,8 @@ model Organizacion {
   auditLogs              AuditLog[]
   passwordResetTokens    PasswordResetToken[]
   invitacionesUsuario    InvitacionUsuario[]
+
+  @@index([grupoEconomicoId])
 }
 
 model Usuario {

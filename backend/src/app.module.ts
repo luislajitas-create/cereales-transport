@@ -10,9 +10,10 @@ import { LiquidacionesModule } from "./liquidaciones/liquidaciones.module";
 import { FacturasModule } from "./facturas/facturas.module";
 import { DashboardModule } from "./dashboard/dashboard.module";
 import { InteligenciaModule } from "./inteligencia/inteligencia.module";
+import { GrupoEconomicoModule } from "./grupo-economico/grupo-economico.module";
 
 @Module({
-  imports: [OrganizacionPrismaModule, AuthModule, AdministracionModule, CatalogosModule, ViajesModule, AnticiposModule, LiquidacionesModule, FacturasModule, DashboardModule, InteligenciaModule],
+  imports: [OrganizacionPrismaModule, AuthModule, AdministracionModule, CatalogosModule, ViajesModule, AnticiposModule, LiquidacionesModule, FacturasModule, DashboardModule, InteligenciaModule, GrupoEconomicoModule],
   controllers: [AppController],
 })
 export class AppModule {}
