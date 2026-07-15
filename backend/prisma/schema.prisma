@@ -320,7 +320,18 @@ model IdentidadChoferGrupo {
   grupoEconomicoId String
   nombreReferencia String
   createdAt        DateTime @default(now())
-  creadoPorId      String?
+  // Excepción deliberada, no omisión (corrección posterior al cierre de 10.2, Hallazgo 2 de la
+  // auditoría técnica independiente): a diferencia de todo otro campo "quién hizo esto" del
+  // schema, este NO es una relación @relation a Usuario. Se evaluaron ambas alternativas:
+  // (A) relación real a Usuario.id habría sido el primer lugar del schema donde una entidad de
+  // grupo queda conectada a un Usuario de cualquiera de las organizaciones del grupo sin pasar
+  // por ningún control de acceso multiempresa (todavía inexistente) — riesgo de exposición si
+  // alguna vez se agrega un include; (B) mantenerlo suelto, porque el dato de "quién" ya queda
+  // capturado con integridad completa y correctamente aislado por organización en
+  // AuditLog.usuarioId del evento "identidad_chofer_creada" — no hay vacío de trazabilidad real.
+  // Se optó por (B). Nunca se completa con un valor recibido del cliente, siempre con
+  // @CurrentUser().id ya validado por el JWT.
+  creadoPorId String?
 
   grupoEconomico GrupoEconomico @relation(fields: [grupoEconomicoId], references: [id], onDelete: Restrict, onUpdate: Cascade)
   choferes       Chofer[]

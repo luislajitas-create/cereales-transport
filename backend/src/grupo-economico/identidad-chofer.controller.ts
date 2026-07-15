@@ -92,6 +92,16 @@ export class IdentidadChoferGrupoController {
 
   // Crea la identidad y vincula, en la misma transacción, el chofer fundador de la organización
   // del actor — nunca existe una identidad sin al menos un chofer real que la originó.
+  //
+  // Corrección Hallazgo 1 (auditoría técnica independiente, post-10.2): el chequeo de arriba
+  // (chofer.identidadChoferGrupoId) es solo informativo — mejora el mensaje en el caso común,
+  // pero NO es lo que garantiza corrección ante concurrencia real. La garantía real es el
+  // updateMany condicional de abajo, dentro de la misma transacción que crea la identidad:
+  // mismo patrón ya usado en LiquidacionesController.create() (where con la condición de
+  // "todavía libre" + verificación de count). Si count da 0 (otra solicitud concurrente ganó la
+  // carrera entre el chequeo y este punto), se lanza una excepción DENTRO de la transacción —
+  // Prisma revierte también la creación de la identidad ya ejecutada en el mismo callback, así
+  // que nunca queda una identidad huérfana persistida.
   @Roles("ADMINISTRADOR")
   @Post("identidades")
   async crear(@Body() body: CreateIdentidadChoferDto, @CurrentUser() actor: any) {
@@ -109,7 +119,17 @@ export class IdentidadChoferGrupoController {
       const identidad = await tx.identidadChoferGrupo.create({
         data: { grupoEconomicoId, nombreReferencia: body.nombreReferencia, creadoPorId: actor.id },
       });
-      await tx.chofer.update({ where: { id: chofer.id }, data: { identidadChoferGrupoId: identidad.id } });
+
+      const { count } = await tx.chofer.updateMany({
+        where: { id: chofer.id, identidadChoferGrupoId: null },
+        data: { identidadChoferGrupoId: identidad.id },
+      });
+      if (count === 0) {
+        throw new BadRequestException(
+          "Ese chofer ya fue vinculado a una identidad de grupo por otra operación en curso — la creación no se aplicó.",
+        );
+      }
+
       await tx.auditLog.create({
         data: {
           usuarioId: actor.id,
@@ -138,6 +158,12 @@ export class IdentidadChoferGrupoController {
   }
 
   // Vincula un chofer YA EXISTENTE de la organización del actor a una identidad ya existente.
+  //
+  // Corrección Hallazgo 1: mismo patrón que crear() — el chequeo previo es solo informativo, la
+  // garantía real es el updateMany condicional dentro de la transacción. Si otra solicitud
+  // concurrente ya vinculó a este chofer entre el chequeo y la escritura, count da 0 y la
+  // operación falla explícitamente, sin sobrescribir nada y sin dejar un AuditLog parcial (el
+  // create de auditoría nunca se ejecuta si el updateMany no afectó ninguna fila).
   @Roles("ADMINISTRADOR")
   @Post("identidades/:id/vincular")
   async vincular(@Param("id") id: string, @Body() body: VincularChoferDto, @CurrentUser() actor: any) {
@@ -162,7 +188,15 @@ export class IdentidadChoferGrupoController {
     }
 
     await this.prisma.$transaction(async (tx) => {
-      await tx.chofer.update({ where: { id: chofer.id }, data: { identidadChoferGrupoId: id } });
+      const { count } = await tx.chofer.updateMany({
+        where: { id: chofer.id, identidadChoferGrupoId: null },
+        data: { identidadChoferGrupoId: id },
+      });
+      if (count === 0) {
+        throw new BadRequestException(
+          "Ese chofer ya fue vinculado a una identidad de grupo por otra operación en curso — la solicitud no se aplicó.",
+        );
+      }
       await tx.auditLog.create({
         data: {
           usuarioId: actor.id,
@@ -179,10 +213,26 @@ export class IdentidadChoferGrupoController {
 
   // Desvincula un chofer de la organización del actor de la identidad indicada. Reversible:
   // el chofer sigue existiendo, con todo su historial, simplemente deja de estar vinculado.
+  //
+  // Corrección Hallazgo 3: ahora valida, con el mismo findFirst({ id, grupoEconomicoId }) que ya
+  // usan detalle() y vincular(), que la identidad exista y pertenezca al grupo del actor ANTES
+  // de comparar contra el chofer — responde 404 sin revelar identidades de otros grupos, en vez
+  // de depender solo de que el chofer nunca pudiera estar vinculado a una identidad ajena.
+  //
+  // Corrección Hallazgo 1 (extendida por consistencia, mismo principio aunque no fue el caso
+  // señalado explícitamente): la escritura también queda protegida con updateMany condicional,
+  // para que una desvinculación nunca revierta por error un vínculo que otra operación ya haya
+  // cambiado entre el chequeo y la escritura.
   @Roles("ADMINISTRADOR")
   @Post("identidades/:id/desvincular")
   async desvincular(@Param("id") id: string, @Body() body: VincularChoferDto, @CurrentUser() actor: any) {
-    await this.grupoDeLaOrganizacion(actor.organizacionId);
+    const grupoEconomicoId = await this.grupoDeLaOrganizacion(actor.organizacionId);
+    const identidad = await this.prisma.identidadChoferGrupo.findFirst({
+      where: { id, grupoEconomicoId },
+      select: { id: true },
+    });
+    if (!identidad) throw new NotFoundException("Identidad de grupo no encontrada.");
+
     const chofer = await this.prisma.chofer.findFirst({
       where: { id: body.choferId, organizacionId: actor.organizacionId },
       select: { id: true, identidadChoferGrupoId: true },
@@ -192,7 +242,13 @@ export class IdentidadChoferGrupoController {
     }
 
     await this.prisma.$transaction(async (tx) => {
-      await tx.chofer.update({ where: { id: chofer.id }, data: { identidadChoferGrupoId: null } });
+      const { count } = await tx.chofer.updateMany({
+        where: { id: chofer.id, identidadChoferGrupoId: id },
+        data: { identidadChoferGrupoId: null },
+      });
+      if (count === 0) {
+        throw new BadRequestException("Ese chofer ya no está vinculado a esta identidad — la solicitud no se aplicó.");
+      }
       await tx.auditLog.create({
         data: {
           usuarioId: actor.id,
