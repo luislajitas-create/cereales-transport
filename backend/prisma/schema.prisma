@@ -83,7 +83,8 @@ model GrupoEconomico {
   nombre    String
   createdAt DateTime @default(now())
 
-  organizaciones Organizacion[]
+  organizaciones         Organizacion[]
+  identidadesChoferGrupo IdentidadChoferGrupo[]
 }
 
 // Bloque 8.1.b, Etapa 1 (Schema inicial) — fundamento del modelo multiempresa.
@@ -287,18 +288,44 @@ model Chofer {
   licenciaVencimiento DateTime?
   telefono            String?
   activo              Boolean   @default(true)
+  // Bloque 10.2 — opcional y nulo por defecto: un Chofer sin identidad de grupo vinculada sigue
+  // siendo, exactamente como hoy, una identidad exclusiva de su organización
+  // (GRUPO_ECONOMICO_DISENO_TECNICO.md, sección 10). Nunca se vincula automáticamente.
+  identidadChoferGrupoId String?
 
-  organizacion  Organizacion? @relation(fields: [organizacionId], references: [id], onDelete: Restrict, onUpdate: Cascade)
-  transportista Transportista @relation(fields: [transportistaId, organizacionId], references: [id, organizacionId])
+  organizacion         Organizacion?         @relation(fields: [organizacionId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  transportista        Transportista         @relation(fields: [transportistaId, organizacionId], references: [id, organizacionId])
+  identidadChoferGrupo IdentidadChoferGrupo? @relation(fields: [identidadChoferGrupoId], references: [id], onDelete: Restrict, onUpdate: Cascade)
 
   viajes        Viaje[]
   anticipos     AnticipoGasto[]
   liquidaciones Liquidacion[]
 
   @@index([organizacionId])
+  @@index([identidadChoferGrupoId])
   @@unique([id, organizacionId])
   @@unique([organizacionId, dni])
   @@unique([organizacionId, cuil])
+}
+
+// Bloque 10.2 — identidad real compartida entre Choferes de distintas Organizaciones del mismo
+// Grupo Económico (GRUPO_ECONOMICO_DISENO_TECNICO.md, sección 10). No es un modelo
+// organizacional (no tiene organizacionId, no vive en ORGANIZACIONAL_MODELS) — mismo
+// tratamiento que GrupoEconomico. Nunca fusiona ni reemplaza los datos de cada Chofer
+// organizacional — es únicamente el vínculo que reconoce que dos o más registros representan
+// a la misma persona real. Solo guarda "nombre de referencia", tal como fija el diseño
+// aprobado — no DNI/CUIL: esos ya existen, por organización, en cada Chofer vinculado.
+model IdentidadChoferGrupo {
+  id               String   @id @default(uuid())
+  grupoEconomicoId String
+  nombreReferencia String
+  createdAt        DateTime @default(now())
+  creadoPorId      String?
+
+  grupoEconomico GrupoEconomico @relation(fields: [grupoEconomicoId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  choferes       Chofer[]
+
+  @@index([grupoEconomicoId])
 }
 
 model Vehiculo {
