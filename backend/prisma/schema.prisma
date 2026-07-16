@@ -87,6 +87,35 @@ model GrupoEconomico {
   identidadesChoferGrupo IdentidadChoferGrupo[]
 }
 
+// Bloque 10.3.a — autorización explícita y adicional para que un Usuario, cuya organización de
+// pertenencia sigue siendo la de siempre, opere una Organización adicional del mismo Grupo
+// Económico (DISENO_BLOQUE10.3_ACCESO_MULTIEMPRESA.md, secciones 1 y 12; DECISIONES_TECNICAS_
+// BLOQUE10.3.md, Decisión 1). No es un modelo organizacional (no vive en ORGANIZACIONAL_MODELS)
+// — mismo tratamiento que GrupoEconomico e IdentidadChoferGrupo, aislamiento manual, nunca por
+// la extensión de Prisma. A diferencia de IdentidadChoferGrupo.creadoPorId (Bloque 10.2, donde
+// se decidió deliberadamente NO crear una relación real a Usuario), acá sí existe una relación
+// real e íntegra a Usuario.id: esta tabla ES, en sí misma, el mecanismo de control de acceso
+// multiempresa — no un campo incidental de auditoría, sino el dato que decide si alguien puede
+// entrar a una organización que no es la suya. Nunca reemplaza Usuario.organizacionId (que sigue
+// siendo, sin cambios, la organización de pertenencia) — es siempre un permiso que se suma.
+model AccesoGrupoEconomico {
+  id             String   @id @default(uuid())
+  usuarioId      String
+  organizacionId String
+  otorgadoPorId  String
+  createdAt      DateTime @default(now())
+
+  usuario      Usuario      @relation("AccesoGrupoUsuario", fields: [usuarioId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  organizacion Organizacion @relation("AccesoGrupoOrganizacion", fields: [organizacionId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  otorgadoPor  Usuario      @relation("AccesoGrupoOtorgadoPor", fields: [otorgadoPorId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  // No puede existir más de un acceso activo para el mismo par usuario/organización
+  // (DISENO_BLOQUE10.3_ACCESO_MULTIEMPRESA.md, sección 1).
+  @@unique([usuarioId, organizacionId])
+  @@index([usuarioId])
+  @@index([organizacionId])
+}
+
 // Bloque 8.1.b, Etapa 1 (Schema inicial) — fundamento del modelo multiempresa.
 // Ver BLOQUE8.1_DISENO_MULTIEMPRESA.md y BLOQUE8.1_PLAN_IMPLEMENTACION_MULTIEMPRESA.md.
 // Campos mínimos para identificar una empresa — sin configuración comercial, moneda,
@@ -130,6 +159,10 @@ model Organizacion {
   auditLogs              AuditLog[]
   passwordResetTokens    PasswordResetToken[]
   invitacionesUsuario    InvitacionUsuario[]
+  // Bloque 10.3.a — accesos de Grupo Económico otorgados A esta organización (usuarios de otra
+  // organización del grupo autorizados a operar esta). No confundir con los accesos que ESTA
+  // organización otorgó — eso vive del lado de Usuario.otorgadoPor, no acá.
+  accesosGrupoEconomico  AccesoGrupoEconomico[] @relation("AccesoGrupoOrganizacion")
 
   @@index([grupoEconomicoId])
 }
@@ -153,6 +186,11 @@ model Usuario {
   auditLogs            AuditLog[]
   passwordResetTokens  PasswordResetToken[]
   invitacionesCreadas  InvitacionUsuario[]
+  // Bloque 10.3.a — accesos de Grupo Económico que este Usuario recibió (organizaciones
+  // adicionales que puede operar) y los que este Usuario otorgó como Administrador de la
+  // organización destino. Dos relaciones distintas hacia el mismo modelo, a propósito.
+  accesosGrupoRecibidos AccesoGrupoEconomico[] @relation("AccesoGrupoUsuario")
+  accesosGrupoOtorgados AccesoGrupoEconomico[] @relation("AccesoGrupoOtorgadoPor")
 
   @@index([organizacionId])
   @@unique([id, organizacionId])
