@@ -8,6 +8,12 @@ import { NotificadorService } from "../notificaciones/notificador.service";
 const ENLACE_INVALIDO = "El enlace no es válido o ya expiró.";
 const TOKEN_RECUPERACION_VIGENCIA_MS = 60 * 60 * 1000; // 60 minutos, mismo criterio que 9.1
 
+// Bloque 10.3.b — mensaje único e idéntico para cualquier motivo de rechazo del cambio de
+// organización (usuario inactivo, organización inexistente, sin AccesoGrupoEconomico, grupo
+// distinto) — DECISIONES_TECNICAS_BLOQUE10.3b.md, Decisión 5: la respuesta nunca debe revelar
+// cuál de esas condiciones ocurrió.
+const CAMBIO_ORGANIZACION_DENEGADO = "No tenés autorización para operar esa organización.";
+
 @Injectable()
 export class AuthService {
   constructor(private prisma: PrismaService, private jwt: JwtService, private notificador: NotificadorService) {}
@@ -37,6 +43,141 @@ export class AuthService {
         organizacionId: usuario.organizacionId,
       },
     };
+  }
+
+  // Bloque 10.3.b — cambia la Organización activa de una sesión ya autenticada, sin volver a
+  // pedir contraseña (DISENO_BLOQUE10.3b_CAMBIO_ORGANIZACION.md, sección 1). `tokenActual` es el
+  // JWT crudo ya validado por JwtAuthGuard (extraído en el controller) — se usa acá únicamente
+  // para leer su `exp` con `this.jwt.decode()` (sin volver a verificar la firma, eso ya lo hizo
+  // el guard) y heredarlo en el token nuevo (Decisión Técnica 2 de Bloque 10.3.b): el cambio de
+  // organización nunca reinicia ni extiende la sesión.
+  //
+  // Validaciones en el orden exacto ya aprobado (Decisión Técnica 1: la lógica vive acá, no en
+  // un guard separado — evita depender de ORGANIZACION_PRISMA/AsyncLocalStorage, que un guard
+  // no podría usar de forma confiable porque los guards de Nest corren antes que los
+  // interceptors, y es OrganizacionContextInterceptor el que siembra ese contexto). Todas las
+  // consultas usan el cliente crudo, exactamente igual que login() — AuthService ya está en el
+  // allow-list de PrismaService crudo (ver prisma.module.ts), y acá tampoco existe todavía un
+  // contexto de organización de destino sobre el cual apoyarse.
+  async cambiarOrganizacion(actor: { id: string; organizacionId: string }, organizacionIdDestino: string, tokenActual: string) {
+    const usuario = await this.prisma.usuario.findUnique({ where: { id: actor.id } });
+    if (!usuario) {
+      await this.registrarIntentoDenegado(actor.organizacionId, actor.id);
+      throw new ForbiddenException(CAMBIO_ORGANIZACION_DENEGADO);
+    }
+    if (!usuario.activo) {
+      await this.registrarIntentoDenegado(usuario.organizacionId, usuario.id);
+      throw new ForbiddenException(CAMBIO_ORGANIZACION_DENEGADO);
+    }
+
+    const organizacionDestino = await this.prisma.organizacion.findUnique({ where: { id: organizacionIdDestino } });
+    if (!organizacionDestino) {
+      await this.registrarIntentoDenegado(usuario.organizacionId, usuario.id);
+      throw new ForbiddenException(CAMBIO_ORGANIZACION_DENEGADO);
+    }
+
+    const esPropiaOrganizacion = organizacionIdDestino === usuario.organizacionId;
+    if (!esPropiaOrganizacion) {
+      const acceso = await this.prisma.accesoGrupoEconomico.findUnique({
+        where: { usuarioId_organizacionId: { usuarioId: usuario.id, organizacionId: organizacionIdDestino } },
+      });
+      if (!acceso) {
+        await this.registrarIntentoDenegado(usuario.organizacionId, usuario.id);
+        throw new ForbiddenException(CAMBIO_ORGANIZACION_DENEGADO);
+      }
+
+      // Revalidado en cada uso, nunca asumido desde el momento en que se otorgó el acceso
+      // (DISENO_BLOQUE10.3_ACCESO_MULTIEMPRESA.md, sección 1) — no aplica al caso de "volver a
+      // la propia organización", que siempre está permitido sin depender de ningún grupo.
+      const organizacionOrigen = await this.prisma.organizacion.findUnique({ where: { id: usuario.organizacionId } });
+      const mismoGrupo =
+        organizacionOrigen?.grupoEconomicoId != null &&
+        organizacionOrigen.grupoEconomicoId === organizacionDestino.grupoEconomicoId;
+      if (!mismoGrupo) {
+        await this.registrarIntentoDenegado(usuario.organizacionId, usuario.id);
+        throw new ForbiddenException(CAMBIO_ORGANIZACION_DENEGADO);
+      }
+    }
+
+    const { exp } = this.jwt.decode(tokenActual) as { exp?: number };
+    const segundosRestantes = (exp ?? 0) - Math.floor(Date.now() / 1000);
+    if (!exp || segundosRestantes <= 0) {
+      throw new UnauthorizedException("La sesión actual ya expiró.");
+    }
+
+    const payload = {
+      sub: usuario.id,
+      email: usuario.email,
+      rol: usuario.rol,
+      nombre: usuario.nombre,
+      organizacionId: organizacionIdDestino,
+    };
+    const accessToken = this.jwt.sign(payload, { expiresIn: segundosRestantes });
+
+    const organizacionOrigenId = usuario.organizacionId;
+    await this.prisma.$transaction([
+      this.prisma.auditLog.create({
+        data: {
+          organizacionId: organizacionOrigenId,
+          usuarioId: usuario.id,
+          entidad: "Usuario",
+          entidadId: usuario.id,
+          accion: "organizacion_activa_cambiada",
+          datosNuevos: { organizacionDestinoId: organizacionIdDestino },
+        },
+      }),
+      this.prisma.auditLog.create({
+        data: {
+          organizacionId: organizacionIdDestino,
+          // AuditLog.usuario es una FK compuesta ([usuarioId, organizacionId] -> Usuario[id,
+          // organizacionId]) — nunca puede apuntar a un Usuario cuya organización de pertenencia
+          // real sea otra (acá, siempre la de origen). Mismo motivo estructural, ya resuelto en
+          // Bloque 10.2, por el que IdentidadChoferGrupo.creadoPorId es un String suelto sin
+          // relación: el "quién" cruzado se conserva como dato plano en datosAnteriores, nunca
+          // como una FK que la base rechazaría (verificado: un intento de setear usuarioId acá
+          // con el id real del usuario cruzado produce P2003, "uno de los datos referenciados no
+          // existe" — no hay ningún Usuario con [id, organizacionIdDestino] real).
+          usuarioId: null,
+          entidad: "Usuario",
+          entidadId: usuario.id,
+          accion: "organizacion_activa_cambiada",
+          datosAnteriores: { organizacionOrigenId, usuarioId: usuario.id },
+        },
+      }),
+    ]);
+
+    return {
+      accessToken,
+      usuario: {
+        id: usuario.id,
+        nombre: usuario.nombre,
+        email: usuario.email,
+        rol: usuario.rol,
+        organizacionId: organizacionIdDestino,
+      },
+    };
+  }
+
+  // Bloque 10.3.b, Decisión Técnica 5 — best-effort, deliberadamente: un fallo al escribir esta
+  // auditoría nunca debe impedir ni alterar el rechazo real. Por eso el error se traga acá
+  // adentro — quien llama a este método siempre sigue con su propio `throw ForbiddenException`
+  // después, pase lo que pase con este intento de registro. Nunca conserva datos de la
+  // organización destino (nombre, CUIT, ni siquiera su id) — solo la organización de origen y el
+  // usuario que lo intentó, exactamente lo que la Decisión Técnica 5 permite conservar.
+  private async registrarIntentoDenegado(organizacionOrigenId: string, usuarioId: string): Promise<void> {
+    try {
+      await this.prisma.auditLog.create({
+        data: {
+          organizacionId: organizacionOrigenId,
+          usuarioId,
+          entidad: "Usuario",
+          entidadId: usuarioId,
+          accion: "intento_cambio_organizacion_denegado",
+        },
+      });
+    } catch {
+      // Silenciado a propósito — ver comentario del método.
+    }
   }
 
   // Bloque 9.3 — solicitud de recuperación. Siempre resuelve sin error y sin distinguir si el
