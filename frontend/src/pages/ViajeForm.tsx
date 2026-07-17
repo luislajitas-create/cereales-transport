@@ -1,9 +1,12 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api/client";
+import { useUnsavedChangesGuard } from "../hooks/useUnsavedChangesGuard";
 
 export default function ViajeForm() {
   const navigate = useNavigate();
+  const [dirty, setDirty] = useState(false);
+  useUnsavedChangesGuard(dirty);
   const [cereales, setCereales] = useState<any[]>([]);
   const [clientes, setClientes] = useState<any[]>([]);
   const [productores, setProductores] = useState<any[]>([]);
@@ -59,6 +62,7 @@ export default function ViajeForm() {
   }, [form.transportistaId]);
 
   function update(field: string, value: string) {
+    setDirty(true);
     setForm((f) => ({ ...f, [field]: value }));
   }
 
@@ -71,6 +75,7 @@ export default function ViajeForm() {
     try {
       const payload: any = { ...form, productorId: form.productorId || null, acopladoId: form.acopladoId || null };
       const { data } = await api.post("/viajes", payload);
+      setDirty(false);
       navigate(`/viajes/${data.id}`);
     } catch (err: any) {
       setError(err?.response?.data?.message || "No se pudo crear el viaje");

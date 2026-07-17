@@ -1,5 +1,8 @@
 import { NavLink, Outlet, Navigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
+import { useConfirm } from "./ConfirmDialog";
+import { useAsyncAction } from "../hooks/useAsyncAction";
+import { useOrganizacionesAccesibles } from "../hooks/useOrganizacionesAccesibles";
 
 const NAV_ITEMS = [
   { to: "/", label: "Dashboard", roles: null },
@@ -22,12 +25,29 @@ const NAV_ITEMS = [
 ];
 
 export default function Layout() {
-  const { usuario, loading, logout } = useAuth();
+  const { usuario, loading, logout, cambiarOrganizacion } = useAuth();
+  const { organizaciones, loading: cargandoOrganizaciones } = useOrganizacionesAccesibles();
+  const confirm = useConfirm();
+  const { busy, error, run } = useAsyncAction();
 
   if (loading) return <div style={{ padding: "2rem" }}>Cargando...</div>;
   if (!usuario) return <Navigate to="/login" replace />;
 
   const items = NAV_ITEMS.filter((item) => !item.roles || item.roles.includes(usuario.rol));
+  const organizacionActual = organizaciones.find((o) => o.esActual);
+
+  async function elegirOrganizacion(e: React.ChangeEvent<HTMLSelectElement>) {
+    const organizacionId = e.target.value;
+    if (!organizacionId || organizacionId === organizacionActual?.id) return;
+    const destino = organizaciones.find((o) => o.id === organizacionId);
+    const { confirmed } = await confirm({
+      title: "Cambiar de Organización",
+      message: `¿Cambiar a ${destino?.nombre}?`,
+      severity: "medium",
+    });
+    if (!confirmed) return;
+    run(() => cambiarOrganizacion(organizacionId));
+  }
 
   return (
     <div className="app-shell">
@@ -43,6 +63,18 @@ export default function Layout() {
         <div className="user-info">
           <div>{usuario.nombre}</div>
           <div className="muted">{usuario.rol}</div>
+          {!cargandoOrganizaciones && organizacionActual && (
+            organizaciones.length > 1 ? (
+              <select value={organizacionActual.id} onChange={elegirOrganizacion} disabled={busy}>
+                {organizaciones.map((o) => (
+                  <option key={o.id} value={o.id}>{o.nombre}</option>
+                ))}
+              </select>
+            ) : (
+              <div className="muted">{organizacionActual.nombre}</div>
+            )
+          )}
+          {error && <div className="error-banner">{error}</div>}
           <NavLink to="/perfil">Mi perfil</NavLink>
           <button onClick={logout}>Cerrar sesión</button>
         </div>

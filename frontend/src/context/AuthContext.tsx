@@ -6,6 +6,7 @@ interface Usuario {
   nombre: string;
   email: string;
   rol: string;
+  organizacionId: string;
 }
 
 interface AuthContextType {
@@ -13,6 +14,7 @@ interface AuthContextType {
   loading: boolean;
   login: (email: string, password: string) => Promise<void>;
   logout: () => void;
+  cambiarOrganizacion: (organizacionId: string) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -33,6 +35,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setLoading(false);
   }, []);
 
+  // Bloque 10.4.b — sincronización entre pestañas (DECISIONES_TECNICAS_BLOQUE10.4b.md,
+  // Decisión 1). Escucha exclusivamente la clave "token" (la última que escribe
+  // cambiarOrganizacion(), señal de que el cambio ya está completo) y recarga la pestaña en su
+  // URL actual — nunca redirige a "/", la pestaña pasiva no tomó ninguna decisión de navegación.
+  useEffect(() => {
+    function handler(event: StorageEvent) {
+      if (event.key === "token" && event.newValue !== event.oldValue) {
+        window.location.reload();
+      }
+    }
+    window.addEventListener("storage", handler);
+    return () => window.removeEventListener("storage", handler);
+  }, []);
+
   async function login(email: string, password: string) {
     const { data } = await api.post("/auth/login", { email, password });
     localStorage.setItem("token", data.accessToken);
@@ -46,7 +62,36 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUsuario(null);
   }
 
-  return <AuthContext.Provider value={{ usuario, loading, login, logout }}>{children}</AuthContext.Provider>;
+  // Bloque 10.4.b — cambio de organización activa (DISENO_BLOQUE10.4b_FRONTEND.md, sección 4).
+  // Escribe "usuario" primero y "token" al final (DECISIONES_TECNICAS_BLOQUE10.4.md, Decisión 6)
+  // — el listener de arriba reacciona solo a "token". Si cualquiera de las dos escrituras falla,
+  // revierte a los valores originales y no recarga. No actualiza el estado de React antes de
+  // recargar — la recarga reconstruye todo desde cero.
+  async function cambiarOrganizacion(organizacionId: string) {
+    const { data } = await api.post("/auth/cambiar-organizacion", { organizacionId });
+
+    const tokenOriginal = localStorage.getItem("token");
+    const usuarioOriginal = localStorage.getItem("usuario");
+
+    try {
+      localStorage.setItem("usuario", JSON.stringify(data.usuario));
+      localStorage.setItem("token", data.accessToken);
+    } catch (err) {
+      if (usuarioOriginal !== null) localStorage.setItem("usuario", usuarioOriginal);
+      else localStorage.removeItem("usuario");
+      if (tokenOriginal !== null) localStorage.setItem("token", tokenOriginal);
+      else localStorage.removeItem("token");
+      throw err;
+    }
+
+    window.location.href = "/";
+  }
+
+  return (
+    <AuthContext.Provider value={{ usuario, loading, login, logout, cambiarOrganizacion }}>
+      {children}
+    </AuthContext.Provider>
+  );
 }
 
 export function useAuth() {
