@@ -30,4 +30,50 @@ export class UsuarioGrupoLookupService {
       select: { id: true, activo: true, organizacionId: true },
     });
   }
+
+  // Bloque 10.4.a — usado exclusivamente por AccesoGrupoController.resolverUsuario(), para
+  // identificar al destinatario de un futuro otorgamiento sin exigir un UUID a mano
+  // (DECISIONES_TECNICAS_BLOQUE10.4.md, Decisión 2). Búsqueda exacta únicamente — nunca parcial,
+  // nunca "contiene", nunca listado abierto. Devuelve `null` ante cualquier no-coincidencia
+  // (usuario inexistente, inactivo, de otro grupo, o de la propia organización del actor) — el
+  // llamador responde siempre el mismo 404 genérico para las cuatro, sin distinguirlas.
+  async resolverEnGrupo(
+    grupoEconomicoId: string,
+    organizacionActorId: string,
+    criterio: { email?: string; usuarioId?: string },
+  ): Promise<{ id: string; nombre: string; email: string; organizacionId: string; nombreOrganizacion: string } | null> {
+    const usuario = criterio.email
+      ? await this.prisma.usuario.findUnique({ where: { email: criterio.email } })
+      : criterio.usuarioId
+        ? await this.prisma.usuario.findUnique({ where: { id: criterio.usuarioId } })
+        : null;
+    if (!usuario || !usuario.activo) return null;
+    if (usuario.organizacionId === organizacionActorId) return null;
+
+    const organizacion = await this.prisma.organizacion.findUnique({ where: { id: usuario.organizacionId } });
+    if (!organizacion || organizacion.grupoEconomicoId !== grupoEconomicoId) return null;
+
+    return {
+      id: usuario.id,
+      nombre: usuario.nombre,
+      email: usuario.email,
+      organizacionId: usuario.organizacionId,
+      nombreOrganizacion: organizacion.nombre,
+    };
+  }
+
+  // Bloque 10.4.a — usado exclusivamente por
+  // OrganizacionesAccesiblesController.organizacionesAccesibles(), para obtener la organización
+  // de pertenencia REAL del actor (Usuario.organizacionId en base), nunca la organización activa
+  // del JWT (actor.organizacionId, ver JwtStrategy). Necesario porque el cliente scopeado
+  // (ORGANIZACION_PRISMA) filtra Usuario por el contexto activo (organizacion-prisma.client.ts,
+  // findUnique descarta el resultado si organizacionId no coincide) — tras un cambio de
+  // organización activa (Bloque 10.3.b) esa consulta devolvería null exactamente en el caso que
+  // este endpoint necesita resolver bien.
+  async organizacionPropia(usuarioId: string): Promise<{ organizacionId: string } | null> {
+    return this.prisma.usuario.findUnique({
+      where: { id: usuarioId },
+      select: { organizacionId: true },
+    });
+  }
 }

@@ -3,9 +3,15 @@ import { UsuarioGrupoLookupModule } from "../prisma/usuario-grupo-lookup.module"
 import { GrupoEconomicoController } from "./grupo-economico.controller";
 import { IdentidadChoferGrupoController } from "./identidad-chofer.controller";
 import { AccesoGrupoController } from "./acceso-grupo.controller";
+import { OrganizacionesAccesiblesController } from "./organizaciones-accesibles.controller";
 
 @Module({
   imports: [UsuarioGrupoLookupModule],
-  controllers: [GrupoEconomicoController, IdentidadChoferGrupoController, AccesoGrupoController],
+  controllers: [
+    GrupoEconomicoController,
+    IdentidadChoferGrupoController,
+    AccesoGrupoController,
+    OrganizacionesAccesiblesController,
+  ],
 })
 export class GrupoEconomicoModule {}

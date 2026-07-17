@@ -8,6 +8,7 @@ import {
   NotFoundException,
   Param,
   Post,
+  Query,
   UseGuards,
 } from "@nestjs/common";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
@@ -127,6 +128,29 @@ export class AccesoGrupoController {
       select: { id: true, usuarioId: true, otorgadoPorId: true, createdAt: true },
       orderBy: { createdAt: "desc" },
     });
+  }
+
+  // Bloque 10.4.a — resolución exacta de un Usuario de otra organización del mismo grupo, para
+  // que otorgar() no exija un UUID a mano (DECISIONES_TECNICAS_BLOQUE10.4.md, Decisión 2).
+  // Exactamente uno de los dos parámetros — nunca ambos, nunca ninguno. Nunca revela cuál de
+  // las cuatro condiciones de rechazo ocurrió (inexistente, inactivo, de otro grupo, o de la
+  // propia organización del actor) — las cuatro responden el mismo 404.
+  @Roles("ADMINISTRADOR")
+  @Get(":id/usuarios/resolver")
+  async resolverUsuario(
+    @Param("id") id: string,
+    @Query("email") email: string | undefined,
+    @Query("usuarioId") usuarioId: string | undefined,
+    @CurrentUser() actor: any,
+  ) {
+    if ((!email && !usuarioId) || (email && usuarioId)) {
+      throw new BadRequestException("Debés indicar exactamente uno: email o usuarioId.");
+    }
+    await this.verificarGrupo(id, actor);
+
+    const resultado = await this.usuarioLookup.resolverEnGrupo(id, actor.organizacionId, { email, usuarioId });
+    if (!resultado) throw new NotFoundException("Usuario no encontrado.");
+    return resultado;
   }
 
   // Revoca un acceso ya otorgado. Solo afecta accesos otorgados por la propia organización del
