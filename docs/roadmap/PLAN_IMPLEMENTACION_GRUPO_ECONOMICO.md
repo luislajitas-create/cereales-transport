@@ -8,6 +8,8 @@ Fecha: 2026-07-15. Registra fielmente el plan de implementación aprobado por el
 
 ## Bloque 10.1 — Modelo base de Grupo Económico
 
+**Estado: ✅ CERRADO** (2026-07-15). Commit funcional `a963ba2`, cierre `99ae7f7`. Acta: `docs/cierres/ACTA_CIERRE_BLOQUE10.1.md`. Forma parte de SDC v1.1 — ver `docs/cierres/HITO_ESTABILIZACION_v1.1.md`.
+
 **Objetivo:** que exista la entidad `GrupoEconomico` y la posibilidad de asociarle organizaciones, sin ningún efecto de comportamiento todavía.
 
 **Alcance exacto:** modelo `GrupoEconomico` (fuera de `ORGANIZACIONAL_MODELS`); `Organizacion.grupoEconomicoId` opcional; un módulo backend chico para crear un grupo y asociar/desasociar organizaciones.
@@ -27,6 +29,8 @@ Fecha: 2026-07-15. Registra fielmente el plan de implementación aprobado por el
 ---
 
 ## Bloque 10.2 — Identidad compartida de Chofer
+
+**Estado: ✅ CERRADO** (2026-07-15). Commits funcionales `fa0a01f` (implementación), `133f8f7` (corrección de atomicidad, hallazgo de auditoría adversarial). Cierre `70f28e2`. Acta: `docs/cierres/ACTA_CIERRE_BLOQUE10.2.md`. Forma parte de SDC v1.1.
 
 **Objetivo:** poder vincular, a mano, dos filas de `Chofer` (una por organización) como la misma persona real.
 
@@ -48,6 +52,12 @@ Fecha: 2026-07-15. Registra fielmente el plan de implementación aprobado por el
 
 ## Bloque 10.3 — Acceso de usuarios y cambio de organización activa
 
+**Estado: ✅ CERRADO.** Ejecutado como dos sub-bloques, no como uno solo (criterio de división de `METODOLOGIA_SDC.md`: capas de riesgo distintas — administración de acceso vs. emisión de token nuevo):
+- **10.3.a** — otorgar/listar/revocar acceso. Commits `23c50dc`, `fd8355b`; cierre `e5931bb`. Acta: `docs/cierres/ACTA_CIERRE_BLOQUE10.3a.md`.
+- **10.3.b** — cambio de organización activa (`POST /auth/cambiar-organizacion`). Commit `8c42486`; cierre `424173a`. Acta: `docs/cierres/ACTA_CIERRE_BLOQUE10.3b.md`.
+
+Forma parte de SDC v1.1.
+
 **Objetivo:** que un usuario autorizado explícitamente pueda operar más de una organización del grupo, cambiando su organización activa sin un login nuevo.
 
 **Alcance exacto:** modelo `AccesoGrupoEconomico`; endpoints de otorgar/revocar acceso; endpoint de cambio de organización activa; guard nuevo y separado de `RolesGuard` — aplicando las 4 Decisiones Técnicas ya aprobadas (solo el Administrador de la organización involucrada otorga; independiente del rol de negocio; indefinido hasta revocación manual).
@@ -67,6 +77,13 @@ Fecha: 2026-07-15. Registra fielmente el plan de implementación aprobado por el
 ---
 
 ## Bloque 10.4 — Frontend de acceso y administración de grupo
+
+**Estado: ✅ CERRADO.** Ejecutado como tres sub-bloques, no como uno solo:
+- **10.4.a** — backend mínimo de soporte (`organizaciones-accesibles`, `usuarios/resolver`). Commit `7ad92dd` (funcional + acta en un mismo commit). Acta: `ACTA_CIERRE_BLOQUE10.4a.md` (raíz del repositorio, excepción documentada).
+- **10.4.b** — selector de organización, cambio de contexto, sincronización entre pestañas. Commit `8168563`. Acta: `docs/cierres/ACTA_CIERRE_BLOQUE10.4b.md`.
+- **10.4.c** — administración visual de accesos (otorgar/listar/revocar desde la interfaz). Commit `8f0dfe9`. Acta: `docs/cierres/ACTA_CIERRE_BLOQUE10.4c.md`.
+
+Con este cierre, **SDC v1.1 queda completo** — ver `docs/cierres/HITO_ESTABILIZACION_v1.1.md` y `docs/RELEASE_NOTES_v1.1.md`.
 
 **Objetivo:** exponer en la interfaz lo que 10.1-10.3 ya construyeron en el backend.
 
