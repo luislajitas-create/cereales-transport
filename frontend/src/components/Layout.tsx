@@ -22,6 +22,7 @@ const NAV_ITEMS = [
   { to: "/organizacion", label: "Mi Organización", roles: null },
   { to: "/administracion/usuarios", label: "Usuarios", roles: ["ADMINISTRADOR"] },
   { to: "/administracion/auditoria", label: "Auditoría Administrativa", roles: ["ADMINISTRADOR"] },
+  { to: "/administracion/grupo-economico", label: "Grupo Económico", roles: ["ADMINISTRADOR"] },
 ];
 
 export default function Layout() {
