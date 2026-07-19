@@ -105,6 +105,8 @@ Con este cierre, **SDC v1.1 queda completo** — ver `docs/cierres/HITO_ESTABILI
 
 ## Bloque 10.5 — Pago Consolidado (backend)
 
+**Estado: ✅ CERRADO** (2026-07-19). Acta: `ACTA_CIERRE_BLOQUE10.5.md` (raíz del repositorio). Auditoría adversarial completa con dos hallazgos medios encontrados y corregidos antes del cierre — ver `AUDITORIA_ADVERSARIAL_BLOQUE10.5.md` y `ANALISIS_DE_HALLAZGOS_BLOQUE10.5.md`. El alcance real difiere levemente del descrito más abajo (redactado antes de la etapa de Diseño/Decisiones): sin concepto de "saldo negativo" ni endpoint "anular" — la operación de reversión antes de pagar se llama `cancelar()`, con las reglas exactas de `DECISIONES_TECNICAS_BLOQUE10.5_PAGO_CONSOLIDADO.md`, documento que prevalece sobre el texto original de este roadmap.
+
 **Objetivo:** construir la capacidad de agrupar liquidaciones cerradas de distintas organizaciones del grupo en un único pago.
 
 **Alcance exacto:** modelos `PagoConsolidado` y `PagoConsolidadoLiquidacion`; endpoints de candidatos, creación, confirmación y anulación, con las reglas exactas ya aprobadas (mismo beneficiario, mismo grupo, sin duplicarse entre pagos activos, sin compensación automática, saldo negativo visible con confirmación explícita, atomicidad).

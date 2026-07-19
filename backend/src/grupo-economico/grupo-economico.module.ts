@@ -4,6 +4,8 @@ import { GrupoEconomicoController } from "./grupo-economico.controller";
 import { IdentidadChoferGrupoController } from "./identidad-chofer.controller";
 import { AccesoGrupoController } from "./acceso-grupo.controller";
 import { OrganizacionesAccesiblesController } from "./organizaciones-accesibles.controller";
+import { PagoConsolidadoController } from "./pago-consolidado.controller";
+import { PagoConsolidadoService } from "./pago-consolidado.service";
 
 @Module({
   imports: [UsuarioGrupoLookupModule],
@@ -12,6 +14,8 @@ import { OrganizacionesAccesiblesController } from "./organizaciones-accesibles.
     IdentidadChoferGrupoController,
     AccesoGrupoController,
     OrganizacionesAccesiblesController,
+    PagoConsolidadoController,
   ],
+  providers: [PagoConsolidadoService],
 })
 export class GrupoEconomicoModule {}

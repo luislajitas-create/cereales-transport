@@ -73,6 +73,27 @@ enum EstadoFacturaEnum {
   ANULADO
 }
 
+// Bloque 10.5 — DECISIONES_TECNICAS_BLOQUE10.5_PAGO_CONSOLIDADO.md, Decisión 5. Transiciones
+// válidas documentadas ahí, no repetidas acá como comentario.
+enum EstadoPagoConsolidadoEnum {
+  BORRADOR
+  PREPARADO
+  PROCESANDO
+  CONFIRMADO
+  PARCIAL
+  FALLIDO
+  CANCELADO
+}
+
+// Bloque 10.5 — progreso real, por fila (= por organización), de la aplicación de un
+// PagoConsolidado (DECISIONES_TECNICAS_BLOQUE10.5_PAGO_CONSOLIDADO.md, Decisión 1). Nunca se
+// infiere desde el estado del PagoConsolidado en sí.
+enum EstadoAplicacionPagoConsolidadoEnum {
+  PENDIENTE
+  APLICADA
+  FALLIDA
+}
+
 // Bloque 10.1 — nivel opcional por encima de Organizacion, para representar un grupo
 // económico que opera con más de un CUIT. Ver GRUPO_ECONOMICO_DISENO_TECNICO.md, sección 10.
 // No es un modelo organizacional (no tiene organizacionId, no vive en ORGANIZACIONAL_MODELS)
@@ -85,6 +106,7 @@ model GrupoEconomico {
 
   organizaciones         Organizacion[]
   identidadesChoferGrupo IdentidadChoferGrupo[]
+  pagosConsolidados      PagoConsolidado[]
 }
 
 // Bloque 10.3.a — autorización explícita y adicional para que un Usuario, cuya organización de
@@ -137,32 +159,35 @@ model Organizacion {
 
   grupoEconomico GrupoEconomico? @relation(fields: [grupoEconomicoId], references: [id], onDelete: Restrict, onUpdate: Cascade)
 
-  usuarios               Usuario[]
-  clientes               Cliente[]
-  contactos              Contacto[]
-  productores            Productor[]
-  transportistas         Transportista[]
-  choferes               Chofer[]
-  vehiculos              Vehiculo[]
-  cereales               Cereal[]
-  ubicaciones            Ubicacion[]
-  tiposGasto             TipoGasto[]
-  viajes                 Viaje[]
-  historialEstadoViajes  HistorialEstadoViaje[]
-  anticiposGasto         AnticipoGasto[]
-  liquidaciones          Liquidacion[]
-  liquidacionesViaje     LiquidacionViaje[]
-  liquidacionMovimientos LiquidacionMovimiento[]
-  facturas               Factura[]
-  facturasViaje          FacturaViaje[]
-  cobranzas              Cobranza[]
-  auditLogs              AuditLog[]
-  passwordResetTokens    PasswordResetToken[]
-  invitacionesUsuario    InvitacionUsuario[]
+  usuarios                     Usuario[]
+  clientes                     Cliente[]
+  contactos                    Contacto[]
+  productores                  Productor[]
+  transportistas               Transportista[]
+  choferes                     Chofer[]
+  vehiculos                    Vehiculo[]
+  cereales                     Cereal[]
+  ubicaciones                  Ubicacion[]
+  tiposGasto                   TipoGasto[]
+  viajes                       Viaje[]
+  historialEstadoViajes        HistorialEstadoViaje[]
+  anticiposGasto               AnticipoGasto[]
+  liquidaciones                Liquidacion[]
+  liquidacionesViaje           LiquidacionViaje[]
+  liquidacionMovimientos       LiquidacionMovimiento[]
+  facturas                     Factura[]
+  facturasViaje                FacturaViaje[]
+  cobranzas                    Cobranza[]
+  auditLogs                    AuditLog[]
+  passwordResetTokens          PasswordResetToken[]
+  invitacionesUsuario          InvitacionUsuario[]
   // Bloque 10.3.a — accesos de Grupo Económico otorgados A esta organización (usuarios de otra
   // organización del grupo autorizados a operar esta). No confundir con los accesos que ESTA
   // organización otorgó — eso vive del lado de Usuario.otorgadoPor, no acá.
-  accesosGrupoEconomico  AccesoGrupoEconomico[] @relation("AccesoGrupoOrganizacion")
+  accesosGrupoEconomico        AccesoGrupoEconomico[]       @relation("AccesoGrupoOrganizacion")
+  // Bloque 10.5 — filas de PagoConsolidadoLiquidacion donde esta organización es la dueña real
+  // de la liquidación incluida (dato explícito, nunca inferido).
+  pagoConsolidadoLiquidaciones PagoConsolidadoLiquidacion[]
 
   @@index([grupoEconomicoId])
 }
@@ -179,21 +204,21 @@ model Usuario {
 
   organizacion Organizacion? @relation(fields: [organizacionId], references: [id], onDelete: Restrict, onUpdate: Cascade)
 
-  viajesCreados        Viaje[]                @relation("ViajeCreadoPor")
-  historialCambios     HistorialEstadoViaje[]
-  anticiposRegistrados AnticipoGasto[]
-  liquidacionesCreadas Liquidacion[]          @relation("LiquidacionCreadaPor")
-  auditLogs            AuditLog[]
-  passwordResetTokens  PasswordResetToken[]
-  invitacionesCreadas  InvitacionUsuario[]
+  viajesCreados         Viaje[]                @relation("ViajeCreadoPor")
+  historialCambios      HistorialEstadoViaje[]
+  anticiposRegistrados  AnticipoGasto[]
+  liquidacionesCreadas  Liquidacion[]          @relation("LiquidacionCreadaPor")
+  auditLogs             AuditLog[]
+  passwordResetTokens   PasswordResetToken[]
+  invitacionesCreadas   InvitacionUsuario[]
   // Bloque 10.3.a — accesos de Grupo Económico que este Usuario recibió (organizaciones
   // adicionales que puede operar) y los que este Usuario otorgó como Administrador de la
   // organización destino. Dos relaciones distintas hacia el mismo modelo, a propósito.
   accesosGrupoRecibidos AccesoGrupoEconomico[] @relation("AccesoGrupoUsuario")
   accesosGrupoOtorgados AccesoGrupoEconomico[] @relation("AccesoGrupoOtorgadoPor")
 
-  @@index([organizacionId])
   @@unique([id, organizacionId])
+  @@index([organizacionId])
 }
 
 // Bloque 9.1/9.3 — token de un solo uso para activación de cuenta nueva (creada por un
@@ -258,9 +283,9 @@ model Cliente {
   viajes    Viaje[]
   facturas  Factura[]
 
-  @@index([organizacionId])
   @@unique([id, organizacionId])
   @@unique([organizacionId, cuit])
+  @@index([organizacionId])
 }
 
 model Contacto {
@@ -287,9 +312,9 @@ model Productor {
   organizacion Organizacion? @relation(fields: [organizacionId], references: [id], onDelete: Restrict, onUpdate: Cascade)
   viajes       Viaje[]
 
-  @@index([organizacionId])
   @@unique([id, organizacionId])
   @@unique([organizacionId, cuit])
+  @@index([organizacionId])
 }
 
 model Transportista {
@@ -309,23 +334,23 @@ model Transportista {
   liquidaciones Liquidacion[]
   anticipos     AnticipoGasto[]
 
-  @@index([organizacionId])
   @@unique([id, organizacionId])
   @@unique([organizacionId, cuit])
+  @@index([organizacionId])
 }
 
 model Chofer {
-  id                  String    @id @default(uuid())
-  organizacionId      String
-  transportistaId     String
-  nombre              String
-  dni                 String?
-  cuil                String
-  comisionPct         Float     @default(0)
-  licenciaNumero      String?
-  licenciaVencimiento DateTime?
-  telefono            String?
-  activo              Boolean   @default(true)
+  id                     String    @id @default(uuid())
+  organizacionId         String
+  transportistaId        String
+  nombre                 String
+  dni                    String?
+  cuil                   String
+  comisionPct            Float     @default(0)
+  licenciaNumero         String?
+  licenciaVencimiento    DateTime?
+  telefono               String?
+  activo                 Boolean   @default(true)
   // Bloque 10.2 — opcional y nulo por defecto: un Chofer sin identidad de grupo vinculada sigue
   // siendo, exactamente como hoy, una identidad exclusiva de su organización
   // (GRUPO_ECONOMICO_DISENO_TECNICO.md, sección 10). Nunca se vincula automáticamente.
@@ -339,11 +364,11 @@ model Chofer {
   anticipos     AnticipoGasto[]
   liquidaciones Liquidacion[]
 
-  @@index([organizacionId])
-  @@index([identidadChoferGrupoId])
   @@unique([id, organizacionId])
   @@unique([organizacionId, dni])
   @@unique([organizacionId, cuil])
+  @@index([organizacionId])
+  @@index([identidadChoferGrupoId])
 }
 
 // Bloque 10.2 — identidad real compartida entre Choferes de distintas Organizaciones del mismo
@@ -369,12 +394,77 @@ model IdentidadChoferGrupo {
   // AuditLog.usuarioId del evento "identidad_chofer_creada" — no hay vacío de trazabilidad real.
   // Se optó por (B). Nunca se completa con un valor recibido del cliente, siempre con
   // @CurrentUser().id ya validado por el JWT.
-  creadoPorId String?
+  creadoPorId      String?
 
-  grupoEconomico GrupoEconomico @relation(fields: [grupoEconomicoId], references: [id], onDelete: Restrict, onUpdate: Cascade)
-  choferes       Chofer[]
+  grupoEconomico    GrupoEconomico    @relation(fields: [grupoEconomicoId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  choferes          Chofer[]
+  pagosConsolidados PagoConsolidado[]
 
   @@index([grupoEconomicoId])
+}
+
+// Bloque 10.5 — consolidación de Liquidaciones de tipo CHOFER, del mismo beneficiario real
+// (IdentidadChoferGrupo), de distintas Organizaciones del mismo Grupo Económico, pagadas con
+// una sola transferencia real (AUDITORIA_BLOQUE10.5_PAGO_CONSOLIDADO.md, sección 1;
+// DISENO_BLOQUE10.5_PAGO_CONSOLIDADO.md, secciones 4-5). No es un modelo organizacional (no
+// vive en ORGANIZACIONAL_MODELS) — mismo tratamiento que GrupoEconomico/AccesoGrupoEconomico/
+// IdentidadChoferGrupo, aislamiento manual, nunca por la extensión de Prisma. creadoPorId/
+// canceladoPorId no son relaciones reales a Usuario — mismo criterio deliberado que
+// IdentidadChoferGrupo.creadoPorId (Bloque 10.2): el "quién" queda con integridad completa y
+// aislado por organización en AuditLog.usuarioId de cada evento; acá son solo datos de
+// referencia, nunca la fuente de autorización real (eso lo decide, en cada llamada,
+// AccesoGrupoEconomico — DECISIONES_TECNICAS_BLOQUE10.5_PAGO_CONSOLIDADO.md, Decisión 4).
+model PagoConsolidado {
+  id                     String                    @id @default(uuid())
+  grupoEconomicoId       String
+  identidadChoferGrupoId String
+  estado                 EstadoPagoConsolidadoEnum @default(BORRADOR)
+  totalConsolidado       Float                     @default(0)
+  referenciaPago         String?
+  creadoPorId            String?
+  canceladoPorId         String?
+  canceladoMotivo        String?
+  createdAt              DateTime                  @default(now())
+  updatedAt              DateTime                  @updatedAt
+
+  grupoEconomico       GrupoEconomico       @relation(fields: [grupoEconomicoId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  identidadChoferGrupo IdentidadChoferGrupo @relation(fields: [identidadChoferGrupoId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  liquidaciones PagoConsolidadoLiquidacion[]
+
+  @@index([grupoEconomicoId])
+  @@index([identidadChoferGrupoId])
+}
+
+// Une, dentro de un PagoConsolidado, cada Liquidacion incluida con la Organizacion dueña real
+// de esa liquidación (dato explícito, nunca inferido). No es organizacional (une organizaciones
+// distintas, no podría serlo). subtotalNetoPagar copia el netoPagar de la Liquidacion al momento
+// de incluirla — mismo criterio de integridad que ya usa LiquidacionViaje al copiar
+// subtotal/comisionMonto en vez de recalcular siempre desde el viaje. estadoAplicacion
+// (DECISIONES_TECNICAS_BLOQUE10.5_PAGO_CONSOLIDADO.md, Decisión 1) registra el progreso real,
+// por fila, de la aplicación en su propia organización. Nunca se borra individualmente — se
+// cancela o se aplica el PagoConsolidado completo.
+model PagoConsolidadoLiquidacion {
+  id                String                              @id @default(uuid())
+  pagoConsolidadoId String
+  organizacionId    String
+  liquidacionId     String
+  subtotalNetoPagar Float
+  estadoAplicacion  EstadoAplicacionPagoConsolidadoEnum @default(PENDIENTE)
+  createdAt         DateTime                            @default(now())
+
+  pagoConsolidado PagoConsolidado @relation(fields: [pagoConsolidadoId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  organizacion    Organizacion    @relation(fields: [organizacionId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  liquidacion     Liquidacion     @relation("PagoConsolidadoLiquidacionDetalle", fields: [liquidacionId, organizacionId], references: [id, organizacionId], onDelete: Restrict, onUpdate: Cascade)
+
+  // Relación inversa del bloqueo (Liquidacion.pagoConsolidadoLiquidacionId,
+  // DECISIONES_TECNICAS_BLOQUE10.5_PAGO_CONSOLIDADO.md, Decisión 3) — nula si esta fila
+  // pertenece a un PagoConsolidado ya CANCELADO (el bloqueo se liberó, la fila persiste).
+  liquidacionBloqueada Liquidacion? @relation("LiquidacionBloqueoPagoConsolidado")
+
+  @@index([pagoConsolidadoId])
+  @@index([organizacionId])
+  @@index([liquidacionId, organizacionId])
 }
 
 model Vehiculo {
@@ -396,22 +486,22 @@ model Vehiculo {
   viajesComoCamion   Viaje[] @relation("ViajeCamion")
   viajesComoAcoplado Viaje[] @relation("ViajeAcoplado")
 
-  @@index([organizacionId])
   @@unique([id, organizacionId])
   @@unique([organizacionId, patente])
+  @@index([organizacionId])
 }
 
 model Cereal {
-  id             String  @id @default(uuid())
+  id             String @id @default(uuid())
   organizacionId String
   nombre         String
 
   organizacion Organizacion? @relation(fields: [organizacionId], references: [id], onDelete: Restrict, onUpdate: Cascade)
   viajes       Viaje[]
 
-  @@index([organizacionId])
   @@unique([id, organizacionId])
   @@unique([organizacionId, nombre])
+  @@index([organizacionId])
 }
 
 model Ubicacion {
@@ -426,8 +516,8 @@ model Ubicacion {
   viajesOrigen  Viaje[] @relation("ViajeOrigen")
   viajesDestino Viaje[] @relation("ViajeDestino")
 
-  @@index([organizacionId])
   @@unique([id, organizacionId])
+  @@index([organizacionId])
 }
 
 model TipoGasto {
@@ -441,9 +531,9 @@ model TipoGasto {
   anticipos   AnticipoGasto[]
   movimientos LiquidacionMovimiento[]
 
-  @@index([organizacionId])
   @@unique([id, organizacionId])
   @@unique([organizacionId, nombre])
+  @@index([organizacionId])
 }
 
 model Viaje {
@@ -473,17 +563,17 @@ model Viaje {
   createdAt         DateTime                  @default(now())
   updatedAt         DateTime                  @updatedAt
 
-  organizacion  Organizacion?  @relation(fields: [organizacionId], references: [id], onDelete: Restrict, onUpdate: Cascade)
-  cereal        Cereal         @relation(fields: [cerealId, organizacionId], references: [id, organizacionId])
-  cliente       Cliente        @relation(fields: [clienteId, organizacionId], references: [id, organizacionId])
-  productor     Productor?     @relation(fields: [productorId, organizacionId], references: [id, organizacionId])
-  transportista Transportista  @relation(fields: [transportistaId, organizacionId], references: [id, organizacionId])
-  chofer        Chofer         @relation(fields: [choferId, organizacionId], references: [id, organizacionId])
-  camion        Vehiculo       @relation("ViajeCamion", fields: [camionId, organizacionId], references: [id, organizacionId])
-  acoplado      Vehiculo?      @relation("ViajeAcoplado", fields: [acopladoId, organizacionId], references: [id, organizacionId])
-  origen        Ubicacion      @relation("ViajeOrigen", fields: [origenId, organizacionId], references: [id, organizacionId])
-  destino       Ubicacion      @relation("ViajeDestino", fields: [destinoId, organizacionId], references: [id, organizacionId])
-  creadoPor     Usuario?       @relation("ViajeCreadoPor", fields: [creadoPorId, organizacionId], references: [id, organizacionId])
+  organizacion  Organizacion? @relation(fields: [organizacionId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  cereal        Cereal        @relation(fields: [cerealId, organizacionId], references: [id, organizacionId])
+  cliente       Cliente       @relation(fields: [clienteId, organizacionId], references: [id, organizacionId])
+  productor     Productor?    @relation(fields: [productorId, organizacionId], references: [id, organizacionId])
+  transportista Transportista @relation(fields: [transportistaId, organizacionId], references: [id, organizacionId])
+  chofer        Chofer        @relation(fields: [choferId, organizacionId], references: [id, organizacionId])
+  camion        Vehiculo      @relation("ViajeCamion", fields: [camionId, organizacionId], references: [id, organizacionId])
+  acoplado      Vehiculo?     @relation("ViajeAcoplado", fields: [acopladoId, organizacionId], references: [id, organizacionId])
+  origen        Ubicacion     @relation("ViajeOrigen", fields: [origenId, organizacionId], references: [id, organizacionId])
+  destino       Ubicacion     @relation("ViajeDestino", fields: [destinoId, organizacionId], references: [id, organizacionId])
+  creadoPor     Usuario?      @relation("ViajeCreadoPor", fields: [creadoPorId, organizacionId], references: [id, organizacionId])
 
   historial              HistorialEstadoViaje[]
   anticipos              AnticipoGasto[]
@@ -491,13 +581,13 @@ model Viaje {
   facturasViaje          FacturaViaje[]
   liquidacionMovimientos LiquidacionMovimiento[]
 
+  @@unique([id, organizacionId])
+  @@unique([organizacionId, ctg])
   @@index([fecha])
   @@index([clienteId])
   @@index([transportistaId])
   @@index([estado])
   @@index([organizacionId])
-  @@unique([id, organizacionId])
-  @@unique([organizacionId, ctg])
 }
 
 model HistorialEstadoViaje {
@@ -543,48 +633,58 @@ model AnticipoGasto {
 
   liquidacionMovimientos LiquidacionMovimiento[]
 
+  @@unique([id, organizacionId])
   @@index([choferId, fecha])
   @@index([transportistaId, fecha])
   @@index([organizacionId])
-  @@unique([id, organizacionId])
 }
 
 model Liquidacion {
-  id              String                @id @default(uuid())
-  organizacionId  String
-  numero          Int                   @default(autoincrement())
-  tipo            TipoLiquidacion
-  transportistaId String?
-  choferId        String?
-  periodoDesde    DateTime
-  periodoHasta    DateTime
-  estado          EstadoLiquidacionEnum @default(BORRADOR)
-  comisionPct     Float                 @default(0)
-  totalBruto      Float                 @default(0)
-  totalAnticipos  Float                 @default(0)
-  totalDescuentos Float                 @default(0)
-  netoPagar       Float                 @default(0)
-  fechaPago       DateTime?
-  creadoPorId     String?
-  createdAt       DateTime              @default(now())
-  updatedAt       DateTime              @updatedAt
+  id                           String                @id @default(uuid())
+  organizacionId               String
+  numero                       Int                   @default(autoincrement())
+  tipo                         TipoLiquidacion
+  transportistaId              String?
+  choferId                     String?
+  periodoDesde                 DateTime
+  periodoHasta                 DateTime
+  estado                       EstadoLiquidacionEnum @default(BORRADOR)
+  comisionPct                  Float                 @default(0)
+  totalBruto                   Float                 @default(0)
+  totalAnticipos               Float                 @default(0)
+  totalDescuentos              Float                 @default(0)
+  netoPagar                    Float                 @default(0)
+  fechaPago                    DateTime?
+  creadoPorId                  String?
+  createdAt                    DateTime              @default(now())
+  updatedAt                    DateTime              @updatedAt
+  // Bloque 10.5 — bloqueo persistente contra participar en más de un Pago Consolidado a la vez
+  // (DECISIONES_TECNICAS_BLOQUE10.5_PAGO_CONSOLIDADO.md, Decisión 3). Nulo por defecto; una
+  // Liquidacion sin ningún Pago Consolidado en curso sigue funcionando exactamente igual que
+  // hoy. Se adquiere/libera con updateMany condicional (mismo patrón que AnticipoGasto.liquidado
+  // y Viaje.estadoLiquidacion en LiquidacionesController.create()) — nunca depende solo de una
+  // verificación en memoria. @unique porque cada PagoConsolidadoLiquidacion es, como máximo, el
+  // bloqueo activo de una única Liquidacion.
+  pagoConsolidadoLiquidacionId String?               @unique
 
-  organizacion  Organizacion?  @relation(fields: [organizacionId], references: [id], onDelete: Restrict, onUpdate: Cascade)
-  transportista Transportista? @relation(fields: [transportistaId, organizacionId], references: [id, organizacionId])
-  chofer        Chofer?        @relation(fields: [choferId, organizacionId], references: [id, organizacionId])
-  creadoPor     Usuario?       @relation("LiquidacionCreadaPor", fields: [creadoPorId, organizacionId], references: [id, organizacionId])
+  organizacion               Organizacion?               @relation(fields: [organizacionId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  transportista              Transportista?              @relation(fields: [transportistaId, organizacionId], references: [id, organizacionId])
+  chofer                     Chofer?                     @relation(fields: [choferId, organizacionId], references: [id, organizacionId])
+  creadoPor                  Usuario?                    @relation("LiquidacionCreadaPor", fields: [creadoPorId, organizacionId], references: [id, organizacionId])
+  pagoConsolidadoLiquidacion PagoConsolidadoLiquidacion? @relation("LiquidacionBloqueoPagoConsolidado", fields: [pagoConsolidadoLiquidacionId], references: [id], onDelete: Restrict, onUpdate: Cascade)
 
-  viajes      LiquidacionViaje[]
-  movimientos LiquidacionMovimiento[]
+  viajes                     LiquidacionViaje[]
+  movimientos                LiquidacionMovimiento[]
+  pagosConsolidadosComoParte PagoConsolidadoLiquidacion[] @relation("PagoConsolidadoLiquidacionDetalle")
 
+  @@unique([id, organizacionId])
   @@index([transportistaId])
   @@index([choferId])
   @@index([organizacionId])
-  @@unique([id, organizacionId])
 }
 
 model LiquidacionViaje {
-  id             String  @id @default(uuid())
+  id             String @id @default(uuid())
   organizacionId String
   liquidacionId  String
   viajeId        String
@@ -642,15 +742,15 @@ model Factura {
   viajes    FacturaViaje[]
   cobranzas Cobranza[]
 
+  @@unique([id, organizacionId])
+  @@unique([organizacionId, numero])
   @@index([clienteId])
   @@index([vencimiento])
   @@index([organizacionId])
-  @@unique([id, organizacionId])
-  @@unique([organizacionId, numero])
 }
 
 model FacturaViaje {
-  id             String  @id @default(uuid())
+  id             String @id @default(uuid())
   organizacionId String
   facturaId      String
   viajeId        String

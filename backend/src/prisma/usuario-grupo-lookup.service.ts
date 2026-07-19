@@ -76,4 +76,28 @@ export class UsuarioGrupoLookupService {
       select: { organizacionId: true },
     });
   }
+
+  // Bloque 10.5 — usado exclusivamente por PagoConsolidadoService, para resolver qué
+  // organizaciones tienen un Chofer vinculado a una IdentidadChoferGrupo dada, sin depender de
+  // qué organización esté activa en el contexto (Chofer es organizacional — el cliente scopeado
+  // lo filtraría a una sola organización, exactamente el mismo problema ya resuelto acá arriba
+  // para Usuario). Este servicio ya es, desde 10.3.a, el único componente autorizado a leer
+  // modelos organizacionales de cualquier organización para operaciones transversales de Grupo
+  // Económico — este método extiende esa misma responsabilidad a Chofer, no abre un allow-list
+  // nuevo. Nunca expone más que id/organizacionId/nombre/comisionPct — ni licencia, ni ningún
+  // otro dato del Chofer.
+  async resolverChoferesDeIdentidad(
+    identidadChoferGrupoId: string,
+  ): Promise<{ choferId: string; organizacionId: string; nombre: string; comisionPct: number }[]> {
+    const choferes = await this.prisma.chofer.findMany({
+      where: { identidadChoferGrupoId },
+      select: { id: true, organizacionId: true, nombre: true, comisionPct: true },
+    });
+    return choferes.map((c) => ({
+      choferId: c.id,
+      organizacionId: c.organizacionId,
+      nombre: c.nombre,
+      comisionPct: c.comisionPct,
+    }));
+  }
 }
