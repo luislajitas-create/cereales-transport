@@ -127,6 +127,8 @@ Con este cierre, **SDC v1.1 queda completo** — ver `docs/cierres/HITO_ESTABILI
 
 ## Bloque 10.6 — Pago Consolidado (frontend)
 
+**Estado: Cierre técnico completado — pendiente de integración (commit y push) y de aprobación final** (2026-07-22). Acta: `ACTA_CIERRE_BLOQUE10.6.md` (raíz del repositorio). Auditoría adversarial completa con 7 hallazgos encontrados y corregidos (uno de severidad alta) — ver `AUDITORIA_ADVERSARIAL_BLOQUE10.6.md`. La reverificación posterior a la corrección detectó y corrigió, además, dos bugs propios de la corrección inicial (uno de ellos revocando un hallazgo de la propia auditoría, que había calificado como "código muerto" una guarda que en realidad es necesaria) — ver `DECISIONES_TECNICAS_BLOQUE10.6_PAGO_CONSOLIDADO.md`, adenda sección 22. El alcance real difiere levemente del descrito más abajo (redactado antes de la etapa de Diseño/Decisiones): sin operación de "anulación" (no existe ese concepto en lo implementado en 10.5), diez contratos de backend consumidos en vez de los inicialmente previstos — `DECISIONES_TECNICAS_BLOQUE10.6_PAGO_CONSOLIDADO.md` prevalece sobre el texto original de este roadmap. **Sin cambios de backend en ningún momento de todo el bloque.**
+
 **Objetivo:** exponer en la interfaz lo construido en 10.5, cerrando de punta a punta el caso real que originó todo el Bloque 10.
 
 **Alcance exacto:** selección de liquidaciones elegibles; creación/confirmación/anulación del pago consolidado; consulta de pagos consolidados.

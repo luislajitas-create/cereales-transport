@@ -98,8 +98,20 @@ tbody tr:hover { background: #f0f4f7; }
 .badge.CONFIRMADA { background: var(--accent); }
 .badge.PAGADA { background: var(--success); }
 
+/* Bloque 10.6 — estados de PagoConsolidado y estadoAplicacion (DECISIONES_TECNICAS_
+   BLOQUE10.6_PAGO_CONSOLIDADO.md, sección 8) que no coinciden con ningún estado ya estilado
+   arriba. PENDIENTE y CANCELADO ya existen (Viajes/Liquidaciones) y se reutilizan tal cual. */
+.badge.PREPARADO { background: var(--accent); }
+.badge.PROCESANDO { background: #b8860b; }
+.badge.CONFIRMADO { background: var(--success); }
+.badge.PARCIAL { background: #b8860b; }
+.badge.FALLIDO { background: var(--danger); }
+.badge.APLICADA { background: var(--success); }
+.badge.FALLIDA { background: var(--danger); }
+
 .error-banner { background: #fdecea; color: var(--danger); padding: 0.7rem 1rem; border-radius: 4px; margin-bottom: 1rem; font-size: 0.85rem; }
 .success-banner { background: #e6f4ea; color: var(--success); padding: 0.7rem 1rem; border-radius: 4px; margin-bottom: 1rem; font-size: 0.85rem; }
+.warning-banner { background: #fdf3e0; color: #8a6d1f; padding: 0.7rem 1rem; border-radius: 4px; margin-bottom: 1rem; font-size: 0.85rem; }
 
 .confirm-overlay {
   position: fixed; inset: 0; background: rgba(20, 30, 38, 0.45);
