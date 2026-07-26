@@ -7,6 +7,7 @@ import { RolesGuard } from "../auth/roles.guard";
 import { Roles } from "../auth/roles.decorator";
 import { ORGANIZACION_PRISMA } from "../prisma/organizacion-prisma.token";
 import { OrganizacionPrismaClient } from "../prisma/organizacion-prisma.client";
+import { encontrarOFallar } from "../common/encontrar-o-fallar";
 import { CreateClienteDto } from "./dto/create-cliente.dto";
 import { UpdateClienteDto } from "./dto/update-cliente.dto";
 
@@ -29,8 +30,9 @@ export class ClientesController {
   }
 
   @Get(":id")
-  findOne(@Param("id") id: string) {
-    return this.prisma.cliente.findUnique({ where: { id }, include: { contactos: true } });
+  async findOne(@Param("id") id: string) {
+    const cliente = await this.prisma.cliente.findUnique({ where: { id }, include: { contactos: true } });
+    return encontrarOFallar(cliente, "Cliente no encontrado.");
   }
 
   @Roles("OPERACIONES", "FACTURACION", "ADMINISTRADOR")

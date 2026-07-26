@@ -7,6 +7,7 @@ import { RolesGuard } from "../auth/roles.guard";
 import { Roles } from "../auth/roles.decorator";
 import { ORGANIZACION_PRISMA } from "../prisma/organizacion-prisma.token";
 import { OrganizacionPrismaClient } from "../prisma/organizacion-prisma.client";
+import { encontrarOFallar } from "../common/encontrar-o-fallar";
 import { CreateChoferDto } from "./dto/create-chofer.dto";
 import { UpdateChoferDto } from "./dto/update-chofer.dto";
 
@@ -27,8 +28,9 @@ export class ChoferesController {
   }
 
   @Get(":id")
-  findOne(@Param("id") id: string) {
-    return this.prisma.chofer.findUnique({ where: { id } });
+  async findOne(@Param("id") id: string) {
+    const chofer = await this.prisma.chofer.findUnique({ where: { id } });
+    return encontrarOFallar(chofer, "Chofer no encontrado.");
   }
 
   @Roles("OPERACIONES", "LIQUIDACIONES", "ADMINISTRADOR")

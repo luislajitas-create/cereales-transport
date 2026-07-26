@@ -7,6 +7,7 @@ import { RolesGuard } from "../auth/roles.guard";
 import { Roles } from "../auth/roles.decorator";
 import { ORGANIZACION_PRISMA } from "../prisma/organizacion-prisma.token";
 import { OrganizacionPrismaClient } from "../prisma/organizacion-prisma.client";
+import { encontrarOFallar } from "../common/encontrar-o-fallar";
 import { CreateTransportistaDto } from "./dto/create-transportista.dto";
 import { UpdateTransportistaDto } from "./dto/update-transportista.dto";
 
@@ -25,11 +26,12 @@ export class TransportistasController {
   }
 
   @Get(":id")
-  findOne(@Param("id") id: string) {
-    return this.prisma.transportista.findUnique({
+  async findOne(@Param("id") id: string) {
+    const transportista = await this.prisma.transportista.findUnique({
       where: { id },
       include: { choferes: true, vehiculos: true },
     });
+    return encontrarOFallar(transportista, "Transportista no encontrado.");
   }
 
   @Roles("OPERACIONES", "ADMINISTRADOR")
