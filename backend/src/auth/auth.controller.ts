@@ -1,6 +1,7 @@
-import { Body, Controller, HttpCode, Post, Req, UseGuards } from "@nestjs/common";
+import { Body, Controller, ExecutionContext, HttpCode, Injectable, Post, Req, UseGuards } from "@nestjs/common";
 import { Request } from "express";
 import { ExtractJwt } from "passport-jwt";
+import { ThrottlerException, ThrottlerGuard, Throttle } from "@nestjs/throttler";
 import { AuthService } from "./auth.service";
 import { JwtAuthGuard } from "./jwt-auth.guard";
 import { CurrentUser } from "./current-user.decorator";
@@ -8,13 +9,29 @@ import { LoginDto } from "./dto/login.dto";
 import { RecuperarContrasenaDto } from "./dto/recuperar-contrasena.dto";
 import { RestablecerContrasenaDto } from "./dto/restablecer-contrasena.dto";
 import { CambiarOrganizacionDto } from "./dto/cambiar-organizacion.dto";
+import { LOGIN_THROTTLE_TTL_MS, LOGIN_THROTTLE_LIMITE } from "./auth.module";
 
 const MENSAJE_RECUPERACION = "Si el email corresponde a una cuenta, vas a recibir un enlace para recuperar el acceso.";
+
+// Bloque 11, H-07 — único propósito: reemplazar el mensaje en inglés por defecto de la
+// librería por uno en español, consistente con el resto de los mensajes de error del sistema.
+// No cambia ningún otro comportamiento del guard estándar.
+@Injectable()
+class LoginThrottlerGuard extends ThrottlerGuard {
+  protected async throwThrottlingException(_context: ExecutionContext): Promise<void> {
+    throw new ThrottlerException("Demasiados intentos de inicio de sesión. Esperá un minuto antes de volver a intentar.");
+  }
+}
 
 @Controller("auth")
 export class AuthController {
   constructor(private authService: AuthService) {}
 
+  // Bloque 11, H-07 — rate limiting solo acá, nunca a nivel de clase (los otros 3 endpoints
+  // de este controller quedan sin cambios). Clave por IP (comportamiento por defecto de la
+  // librería) — no hay ningún usuario autenticado todavía en el momento del login.
+  @Throttle({ default: { limit: LOGIN_THROTTLE_LIMITE, ttl: LOGIN_THROTTLE_TTL_MS } })
+  @UseGuards(LoginThrottlerGuard)
   @Post("login")
   login(@Body() dto: LoginDto) {
     return this.authService.login(dto.email, dto.password);

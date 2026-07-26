@@ -13,6 +13,13 @@ import { PrismaExceptionFilter } from "./common/filters/prisma-exception.filter"
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
+  // Bloque 11, H-07: producción corre detrás del proxy de Railway — sin esto, Express ve la
+  // IP interna del proxy en vez de la del cliente real, y el rate-limiting por IP de
+  // POST /auth/login (ver AuthModule/AuthController) terminaría agrupando a todos los
+  // usuarios reales bajo una única IP aparente, inutilizando el límite. `INestApplication`
+  // genérico no tipa `.set()` (es un método propio de Express) — se accede vía el adapter
+  // HTTP subyacente, sin cambiar el tipo de `app` en ningún otro punto de este archivo.
+  app.getHttpAdapter().getInstance().set("trust proxy", 1);
   app.enableCors({ origin: process.env.CORS_ORIGIN, credentials: true });
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
   app.useGlobalFilters(new PrismaExceptionFilter());
