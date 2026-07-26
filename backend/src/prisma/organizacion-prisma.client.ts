@@ -47,8 +47,79 @@ function asegurarSinEscrituraAnidada(data: unknown, operacion: string) {
   }
 }
 
+// Bloque 11, H-02 — $queryRaw/$queryRawUnsafe/$executeRaw/$executeRawUnsafe no son
+// interceptados por $extends() (las Query Extensions de Prisma no cubren estos 4 métodos de
+// nivel superior, ver comentario grande más arriba) y, confirmado empíricamente en
+// pre-implementación, tampoco son propiedades propias del objeto extendido — una eliminación
+// o reasignación directa no los habría bloqueado de forma confiable. Este Proxy envuelve
+// ÚNICAMENTE el objeto devuelto acá (el que queda inyectado como ORGANIZACION_PRISMA) — nunca
+// toca `tx`, que Prisma construye de forma independiente en cada $transaction() (confirmado
+// empíricamente: tx no comparte identidad con este objeto, incluso invocando $transaction()
+// a través del Proxy).
+//
+// Endurecimiento H-02 (Diseño V2 + Enmienda de "constructor"): el objeto extendido por Prisma
+// ($extends()) es en sí mismo un Proxy interno (createCompositeProxy) cuyo propio trap `set`
+// usa Reflect.set(target, prop, value) de 3 argumentos, descartando el receiver — por eso
+// `cliente.__proto__ = x` NO puede delegarse hacia abajo sin protegerse explícitamente acá:
+// delegar permitiría que el setter heredado de __proto__ se invoque con `this` apuntando al
+// objeto crudo interno, no a este Proxy, saltándose el trap `setPrototypeOf` de más abajo
+// (confirmado empíricamente en VALIDACION_CAUSA_RAIZ_H02_PROTO_SETTER.md). El trap `set`
+// intercepta "__proto__" directamente, sin delegar. El trap `setPrototypeOf` cubre, en cambio,
+// las vías que invocan [[SetPrototypeOf]] directamente sobre este Proxy (Object.setPrototypeOf,
+// Reflect.setPrototypeOf, y el setter heredado de __proto__ invocado explícitamente vía
+// .call(cliente, ...)) — ambos traps son complementarios, ninguno cubre por sí solo todas las
+// vías. La clave "constructor" se intercepta en el trap `get` porque `.bind(target)` por sí
+// solo es insuficiente: la función ligada resultante no tiene `.prototype` propio (garantía de
+// bind()), pero SÍ hereda por [[Prototype]] el `.prototype` real de la clase original — para
+// PrismaService (extends PrismaClient), eso expone PrismaClient.prototype con los 4 métodos
+// raw sin protección (confirmado en INVESTIGACION_DISCREPANCIA_CONSTRUCTOR_PROTOTYPE.md). Se
+// devuelve el `Object` global sin leer nunca `target["constructor"]`, coherente con que
+// `getPrototypeOf` ya devuelve `Object.prototype` (REVISION_TECNICA_CONSTRUCTOR_PROTOTYPE_H02.md,
+// VALIDACION_ARQUITECTURA_CONSTRUCTOR_OBJECT.md, ENMIENDA_DISENO_H02_V2_CONSTRUCTOR.md).
+const METODOS_RAW_BLOQUEADOS = new Set(["$queryRaw", "$queryRawUnsafe", "$executeRaw", "$executeRawUnsafe"]);
+
+function bloquearMetodosRawDeNivelSuperior<T extends object>(cliente: T): T {
+  return new Proxy(cliente, {
+    get(target, prop, _receiver) {
+      if (typeof prop === "string" && METODOS_RAW_BLOQUEADOS.has(prop)) {
+        throw new Error(
+          `[aislamiento] "${prop}" no está disponible en el cliente organizacional de nivel ` +
+            `superior. Si necesitás una consulta SQL cruda protegida por bloqueo de fila, usá ` +
+            `el cliente de transacción (tx) dentro de $transaction().`,
+        );
+      }
+      if (prop === "__proto__") {
+        return Object.prototype;
+      }
+      if (prop === "constructor") {
+        return Object;
+      }
+      const valor = (target as Record<string, unknown>)[prop as string];
+      return typeof valor === "function" ? valor.bind(target) : valor;
+    },
+    set(target, prop, value, receiver) {
+      if (prop === "__proto__") {
+        throw new Error(
+          `[aislamiento] no está permitido reasignar "__proto__" en el cliente organizacional ` +
+            `de nivel superior.`,
+        );
+      }
+      return Reflect.set(target, prop, value, receiver);
+    },
+    getPrototypeOf(_target) {
+      return Object.prototype;
+    },
+    setPrototypeOf(_target, _proto) {
+      throw new Error(
+        `[aislamiento] no está permitido modificar el prototipo del cliente organizacional de ` +
+          `nivel superior.`,
+      );
+    },
+  }) as T;
+}
+
 export function crearClienteOrganizacional(prisma: PrismaService) {
-  return prisma.$extends({
+  const clienteExtendido = prisma.$extends({
     name: "organizacion-scope",
     query: {
       $allModels: {
@@ -169,6 +240,8 @@ export function crearClienteOrganizacional(prisma: PrismaService) {
       },
     },
   });
+
+  return bloquearMetodosRawDeNivelSuperior(clienteExtendido);
 }
 
 type NombrePropiedadModeloOrganizacional =
