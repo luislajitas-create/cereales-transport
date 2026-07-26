@@ -151,8 +151,11 @@ export class ClientesController {
 
   @Get(":id/cuenta-corriente")
   async cuentaCorriente(@Param("id") id: string) {
+    // Bloque 11, H-08: una factura ANULADO no puede tener cobranzas vigentes asociadas
+    // (facturas.controller.ts, anular() lo rechaza explícitamente) — excluirla acá nunca
+    // hace desaparecer un cobro real ya registrado, solo el importe de una factura cancelada.
     const facturas = await this.prisma.factura.findMany({
-      where: { clienteId: id },
+      where: { clienteId: id, estado: { not: "ANULADO" } },
       include: { cobranzas: { where: { anulada: false } } },
       orderBy: { fecha: "asc" },
     });
