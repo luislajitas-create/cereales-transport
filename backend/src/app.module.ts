@@ -11,9 +11,10 @@ import { FacturasModule } from "./facturas/facturas.module";
 import { DashboardModule } from "./dashboard/dashboard.module";
 import { InteligenciaModule } from "./inteligencia/inteligencia.module";
 import { GrupoEconomicoModule } from "./grupo-economico/grupo-economico.module";
+import { DatabaseHealthModule } from "./prisma/database-health.module";
 
 @Module({
-  imports: [OrganizacionPrismaModule, AuthModule, AdministracionModule, CatalogosModule, ViajesModule, AnticiposModule, LiquidacionesModule, FacturasModule, DashboardModule, InteligenciaModule, GrupoEconomicoModule],
+  imports: [OrganizacionPrismaModule, AuthModule, AdministracionModule, CatalogosModule, ViajesModule, AnticiposModule, LiquidacionesModule, FacturasModule, DashboardModule, InteligenciaModule, GrupoEconomicoModule, DatabaseHealthModule],
   controllers: [AppController],
 })
 export class AppModule {}

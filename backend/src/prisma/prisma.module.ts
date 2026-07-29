@@ -11,6 +11,8 @@ import { PrismaService } from "./prisma.service";
 //      cliente Prisma en sí — ningún otro módulo puede terminar con el crudo por importar este.
 //   3. OrganizacionPrismaModule — lo envuelve con el scoping automático (ORGANIZACION_PRISMA),
 //      el único cliente que debe llegar a cualquier otro módulo funcional del sistema.
+//   4. DatabaseHealthModule (Bloque A, A-04) — único método expuesto: SELECT 1 de solo lectura
+//      para GET /health. Mismo patrón: expone solo DatabaseHealthService, nunca el cliente.
 // Ningún otro módulo debe importar este módulo directamente. Verificar el allow-list con:
 //   grep -rnE ": PrismaService[,)]|inject: \[PrismaService\]" backend/src --include=*.ts
 // (acota a una anotación de tipo real — constructor o parámetro de función — o al array
@@ -18,10 +20,10 @@ import { PrismaService } from "./prisma.service";
 // solo lo mencionan, y el módulo _combustibles.disabled/ — código deshabilitado, nunca
 // importado por app.module.ts, sin efecto en runtime, pero SÍ coincide con este patrón porque
 // tiene una inyección de constructor real: hay que descartarlo a mano, no lo excluye el grep).
-// Los resultados reales, verificados el 2026-07-16, son exactamente: auth.service.ts,
+// Los resultados reales, verificados el 2026-07-29, son exactamente: auth.service.ts,
 // usuario-grupo-lookup.service.ts, organizacion-prisma.client.ts (parámetro de la factory),
-// y organizacion-prisma.module.ts (dos coincidencias: el array `inject` y el parámetro del
-// propio `useFactory`) — ningún otro módulo activo.
+// organizacion-prisma.module.ts (dos coincidencias: el array `inject` y el parámetro del
+// propio `useFactory`), y database-health.service.ts — ningún otro módulo activo.
 @Module({
   providers: [PrismaService],
   exports: [PrismaService],

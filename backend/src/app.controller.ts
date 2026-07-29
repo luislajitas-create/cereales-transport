@@ -1,10 +1,21 @@
-import { Controller, Get } from "@nestjs/common";
+import { Controller, Get, ServiceUnavailableException } from "@nestjs/common";
+import { DatabaseHealthService } from "./prisma/database-health.service";
 
 @Controller()
 export class AppController {
+  constructor(private readonly databaseHealth: DatabaseHealthService) {}
+
   @Get("/health")
-  health() {
-    return { status: "ok", message: "Backend is running", timestamp: new Date().toISOString() };
+  async health() {
+    const baseDeDatosConectada = await this.databaseHealth.estaConectada();
+    if (!baseDeDatosConectada) {
+      throw new ServiceUnavailableException({
+        status: "error",
+        database: "unreachable",
+        timestamp: new Date().toISOString(),
+      });
+    }
+    return { status: "ok", database: "connected", timestamp: new Date().toISOString() };
   }
 
   @Get()
