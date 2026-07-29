@@ -14,6 +14,9 @@ export default function Usuarios() {
   const [cargando, setCargando] = useState(true);
   const [errorListado, setErrorListado] = useState("");
 
+  const [invitaciones, setInvitaciones] = useState<any[]>([]);
+  const [cargandoInvitaciones, setCargandoInvitaciones] = useState(true);
+
   const [modo, setModo] = useState<"" | "crear" | "invitar" | "editar">("");
   const [editandoId, setEditandoId] = useState<string | null>(null);
   const [form, setForm] = useState<any>(FORM_VACIO);
@@ -26,6 +29,7 @@ export default function Usuarios() {
   const invitarAccion = useAsyncAction();
   const editarAccion = useAsyncAction();
   const filaAccion = useAsyncAction();
+  const cancelarInvitacionAccion = useAsyncAction();
 
   function cargar() {
     setCargando(true);
@@ -40,12 +44,24 @@ export default function Usuarios() {
       .finally(() => setCargando(false));
   }
 
+  function cargarInvitaciones() {
+    setCargandoInvitaciones(true);
+    api
+      .get("/usuarios/invitaciones")
+      .then((res) => setInvitaciones(res.data))
+      .catch(() => {}) // el listado principal ya muestra el error de permisos si corresponde
+      .finally(() => setCargandoInvitaciones(false));
+  }
+
   useEffect(() => {
     // GET /usuarios no está restringido por rol en el backend (decisión ya cerrada de Bloque
     // 9.1) — la pantalla completa es exclusiva de ADMINISTRADOR, así que ni siquiera se pide el
     // listado para otro rol; evita exponer nombre/email/rol de la organización a quien llegó acá
     // por URL directa, sin depender de que el backend lo rechace.
-    if (usuario?.rol === "ADMINISTRADOR") cargar();
+    if (usuario?.rol === "ADMINISTRADOR") {
+      cargar();
+      cargarInvitaciones();
+    }
   }, [usuario]);
 
   const administradoresActivos = usuarios.filter((u) => u.rol === "ADMINISTRADOR" && u.activo).length;
@@ -92,6 +108,7 @@ export default function Usuarios() {
       async () => {
         await api.post("/usuarios/invitaciones", form);
         setForm(FORM_VACIO);
+        cargarInvitaciones();
       },
       {
         successMessage: "Invitación enviada. La entrega automática por email depende de que exista un proveedor configurado.",
@@ -170,6 +187,23 @@ export default function Usuarios() {
 
   function copiar(valor: string) {
     navigator.clipboard?.writeText(valor);
+  }
+
+  async function confirmarCancelarInvitacion(inv: any) {
+    const ok = await confirm({
+      title: "Cancelar invitación",
+      message: `¿Cancelar la invitación pendiente para ${inv.email}? Va a dejar de poder aceptarla con el enlace ya enviado.`,
+      confirmLabel: "Cancelar invitación",
+      severity: "high",
+    });
+    if (!ok.confirmed) return;
+    cancelarInvitacionAccion.run(
+      async () => {
+        await api.delete(`/usuarios/invitaciones/${inv.id}`);
+        cargarInvitaciones();
+      },
+      { successMessage: `Invitación para ${inv.email} cancelada.`, errorMessage: "No se pudo cancelar la invitación" },
+    );
   }
 
   if (usuario?.rol !== "ADMINISTRADOR") {
@@ -325,6 +359,43 @@ export default function Usuarios() {
                   </td>
                 </tr>
               ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      <div className="card">
+        <div className="section-title">Invitaciones pendientes</div>
+        {cancelarInvitacionAccion.error && <div className="error-banner">{cancelarInvitacionAccion.error}</div>}
+        {cancelarInvitacionAccion.success && <div className="success-banner">{cancelarInvitacionAccion.success}</div>}
+        {cargandoInvitaciones && <p className="muted">Cargando...</p>}
+        {!cargandoInvitaciones && invitaciones.length === 0 && <p className="muted">No hay invitaciones pendientes.</p>}
+        {!cargandoInvitaciones && invitaciones.length > 0 && (
+          <table>
+            <thead>
+              <tr><th>Nombre</th><th>Email</th><th>Rol</th><th>Estado</th><th></th></tr>
+            </thead>
+            <tbody>
+              {invitaciones.map((inv) => {
+                const expirada = new Date(inv.expiresAt) < new Date();
+                return (
+                  <tr key={inv.id}>
+                    <td>{inv.nombre}</td>
+                    <td>{inv.email}</td>
+                    <td>{inv.rol}</td>
+                    <td>{expirada ? "Expirada" : "Esperando aceptación"}</td>
+                    <td>
+                      <button
+                        className="btn danger"
+                        disabled={cancelarInvitacionAccion.busy}
+                        onClick={() => confirmarCancelarInvitacion(inv)}
+                      >
+                        Cancelar
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         )}

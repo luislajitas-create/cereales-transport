@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Delete,
   Get,
   Inject,
   NotFoundException,
@@ -132,6 +133,44 @@ export class UsuariosController {
     await this.notificador.enviarInvitacionUsuario(body.email, enlace);
 
     return { message: "Invitación enviada correctamente." };
+  }
+
+  // Panel de Administración de Organización: la única brecha real encontrada en la auditoría
+  // de Bloque 9 — existía alta/reenvío de invitación, pero no forma de ver ni cancelar las
+  // pendientes. `InvitacionUsuario` ya está en ORGANIZACIONAL_MODELS, así que el scoping por
+  // organización es automático (mismo mecanismo que el resto del controller).
+  @Roles("ADMINISTRADOR")
+  @Get("invitaciones")
+  listarInvitacionesPendientes() {
+    return this.prisma.invitacionUsuario.findMany({
+      where: { aceptadaEn: null },
+      select: { id: true, email: true, nombre: true, rol: true, expiresAt: true, createdAt: true },
+      orderBy: { createdAt: "desc" },
+    });
+  }
+
+  @Roles("ADMINISTRADOR")
+  @Delete("invitaciones/:id")
+  async cancelarInvitacion(@Param("id") id: string, @CurrentUser() actor: any) {
+    const invitacion = await this.prisma.invitacionUsuario.findUnique({ where: { id } });
+    if (!invitacion) throw new NotFoundException("Invitación no encontrada");
+    if (invitacion.aceptadaEn) {
+      throw new BadRequestException("Esta invitación ya fue aceptada, no se puede cancelar.");
+    }
+
+    await this.prisma.invitacionUsuario.delete({ where: { id } });
+
+    await this.prisma.auditLog.create({
+      data: {
+        usuarioId: actor.id,
+        entidad: "Usuario",
+        entidadId: id,
+        accion: "invitacion_cancelada",
+        datosAnteriores: { email: invitacion.email, nombre: invitacion.nombre, rol: invitacion.rol },
+      },
+    });
+
+    return { message: "Invitación cancelada." };
   }
 
   @Roles("ADMINISTRADOR")
