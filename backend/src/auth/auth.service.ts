@@ -1,9 +1,10 @@
-import { BadRequestException, ForbiddenException, Injectable, UnauthorizedException } from "@nestjs/common";
+import { BadRequestException, ForbiddenException, Injectable, Logger, UnauthorizedException } from "@nestjs/common";
 import { JwtService } from "@nestjs/jwt";
 import * as bcrypt from "bcryptjs";
 import { PrismaService } from "../prisma/prisma.service";
 import { generarTokenSeguro, hashearToken } from "../administracion/token-utils";
 import { NotificadorService } from "../notificaciones/notificador.service";
+import { AltaOrganizacionDto } from "./dto/alta-organizacion.dto";
 
 const ENLACE_INVALIDO = "El enlace no es válido o ya expiró.";
 const TOKEN_RECUPERACION_VIGENCIA_MS = 60 * 60 * 1000; // 60 minutos, mismo criterio que 9.1
@@ -16,6 +17,8 @@ const CAMBIO_ORGANIZACION_DENEGADO = "No tenés autorización para operar esa or
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+
   constructor(private prisma: PrismaService, private jwt: JwtService, private notificador: NotificadorService) {}
 
   async login(email: string, password: string) {
@@ -301,6 +304,87 @@ export class AuthService {
         },
       });
     });
+  }
+
+  // Alta de Organización self-service (Tarea 1). Primer endpoint público que CREA una
+  // organización real — a diferencia de aceptarInvitacion (que crea un Usuario dentro de una
+  // organización YA existente), acá no hay ningún contexto previo: cliente crudo de Prisma,
+  // mismo criterio que el resto de los métodos públicos de esta clase. Todo dentro de una
+  // única transacción — decisión del PO: "no dejar organizaciones parcialmente inicializadas".
+  //
+  // El honeypot (dto.sitioWeb) se resuelve acá, no en el controller ni en un guard: si viene
+  // completo, no se toca la base y se devuelve el mismo resultado de éxito que el caso real —
+  // técnica estándar de honeypot, para no revelarle a quien lo completó que fue detectado.
+  async altaOrganizacion(dto: AltaOrganizacionDto) {
+    if (dto.sitioWeb) {
+      this.logger.warn(`Alta de organización bloqueada por honeypot — email declarado: ${dto.administrador.email}`);
+      return { message: "Organización creada correctamente. Ya podés iniciar sesión.", organizacion: null };
+    }
+
+    const { organizacion, administrador } = dto;
+    const passwordHash = await bcrypt.hash(administrador.password, 10);
+
+    const resultado = await this.prisma.$transaction(async (tx) => {
+      const cuitYaUsado = await tx.organizacion.findUnique({ where: { cuit: organizacion.cuit } });
+      if (cuitYaUsado) {
+        throw new BadRequestException("Ya existe una organización registrada con ese CUIT.");
+      }
+
+      const emailYaUsado = await tx.usuario.findUnique({ where: { email: administrador.email } });
+      if (emailYaUsado) {
+        throw new BadRequestException("Ya existe una cuenta con ese email. Iniciá sesión o recuperá tu acceso.");
+      }
+
+      // grupoEconomicoId queda null (default del schema) — decisión del PO: la organización
+      // nace sin grupo, se asocia después con el flujo ya existente (GrupoEconomicoController).
+      const nuevaOrganizacion = await tx.organizacion.create({
+        data: {
+          nombre: organizacion.nombre,
+          cuit: organizacion.cuit,
+          razonSocial: organizacion.razonSocial,
+          domicilio: organizacion.domicilio,
+          telefono: organizacion.telefono,
+        },
+      });
+
+      const nuevoAdministrador = await tx.usuario.create({
+        data: {
+          organizacionId: nuevaOrganizacion.id,
+          nombre: administrador.nombre,
+          email: administrador.email,
+          passwordHash,
+          rol: "ADMINISTRADOR",
+          activo: true,
+        },
+      });
+
+      await tx.auditLog.create({
+        data: {
+          organizacionId: nuevaOrganizacion.id,
+          usuarioId: nuevoAdministrador.id,
+          entidad: "Organizacion",
+          entidadId: nuevaOrganizacion.id,
+          accion: "organizacion_creada_selfservice",
+          datosNuevos: { nombre: nuevaOrganizacion.nombre, cuit: nuevaOrganizacion.cuit, administradorEmail: nuevoAdministrador.email },
+        },
+      });
+
+      return { nuevaOrganizacion, nuevoAdministrador };
+    });
+
+    // No bloqueante (decisión del PO): un fallo acá nunca debe deshacer ni impedir el alta ya
+    // confirmada — mismo criterio que registrarIntentoDenegado. NotificadorService ya maneja
+    // por su cuenta la ausencia de proveedor de email real (nunca lanza).
+    this.notificador
+      .enviarBienvenidaOrganizacion(resultado.nuevoAdministrador.email, resultado.nuevaOrganizacion.nombre)
+      .catch((error) =>
+        this.logger.error(`Fallo no bloqueante al enviar bienvenida: ${error instanceof Error ? error.message : String(error)}`),
+      );
+
+    return {
+      message: "Organización creada correctamente. Ya podés iniciar sesión.",
+      organizacion: { id: resultado.nuevaOrganizacion.id, nombre: resultado.nuevaOrganizacion.nombre },
+    };
   }
 
   private async buscarInvitacionValida(token: string) {

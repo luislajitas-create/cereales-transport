@@ -27,4 +27,16 @@ export class NotificadorService {
     }
     this.logger.log(`[dev] Enlace de invitación para ${destinatario}: ${enlace}`);
   }
+
+  // Alta de Organización self-service — a diferencia de los dos métodos de arriba, no lleva
+  // ningún token (no hay nada que canjear, la cuenta ya queda activa). Puramente informativo,
+  // por eso nunca debe bloquear el alta si falla: quien la llama no debe esperar ni propagar
+  // ningún error de este método.
+  async enviarBienvenidaOrganizacion(destinatario: string, nombreOrganizacion: string): Promise<void> {
+    if (process.env.NODE_ENV === "production") {
+      this.logger.log(`Bienvenida generada para ${destinatario} (organización "${nombreOrganizacion}", proveedor de envío aún no configurado)`);
+      return;
+    }
+    this.logger.log(`[dev] Email de bienvenida para ${destinatario} — organización "${nombreOrganizacion}" creada correctamente.`);
+  }
 }

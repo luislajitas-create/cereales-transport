@@ -7,6 +7,7 @@ import { NotificacionesModule } from "../notificaciones/notificaciones.module";
 import { AuthService } from "./auth.service";
 import { AuthController } from "./auth.controller";
 import { InvitacionesPublicasController } from "./invitaciones-publicas.controller";
+import { OrganizacionesPublicasController } from "./organizaciones-publicas.controller";
 import { JwtStrategy } from "./jwt.strategy";
 
 // Bloque 11, H-07: registrado local a AuthModule, no en AppModule — deja el guard disponible
@@ -32,7 +33,7 @@ export const LOGIN_THROTTLE_LIMITE = 10;
     }),
   ],
   providers: [AuthService, JwtStrategy],
-  controllers: [AuthController, InvitacionesPublicasController],
+  controllers: [AuthController, InvitacionesPublicasController, OrganizacionesPublicasController],
   exports: [AuthService],
 })
 export class AuthModule {}
