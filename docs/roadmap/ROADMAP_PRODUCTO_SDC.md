@@ -6,6 +6,15 @@ Fecha: 2026-07-13. Guía oficial de evolución del producto a partir del cierre 
 
 ---
 
+**Actualización 2026-07-29:** este documento no se actualizaba desde su creación (2026-07-13) — no reflejaba la ejecución real de los Bloques 9, 10.x y 11, que **divergió del plan de la sección 7** en nombre y alcance (aunque cubrió, con otro orden, buena parte de lo que esa sección pedía). Estado real, resumido (detalle en cada acta de cierre y en `docs/deuda-tecnica/DEUDA_TECNICA.md`):
+
+- **Bloque 9 real** (`ACTA_CIERRE_BLOQUE9.md`) — coincide en espíritu con el "Bloque 9" de la sección 7 (Administración de Organización y Usuarios): administración de usuarios, perfil propio, recuperación de contraseña, datos de organización. **Cerrado.**
+- **Bloque 10.1-10.6 real** — **no** fue "Endurecimiento de seguridad remanente" (lo que este documento llamaba "Bloque 10"). Fue el desarrollo, no anticipado acá, de **Grupo Económico**: multiempresa entre organizaciones relacionadas, acceso cruzado, pago consolidado (SDC v1.1). **Cerrado** (10.1-10.5 con acta; 10.6 frontend validado). Ver `docs/cierres/ACTA_CIERRE_BLOQUE10.X.md`.
+- **Bloque 11 real** (`CIERRE_GLOBAL_BLOQUE11.md`) — este sí fue el "Endurecimiento de seguridad" que la sección 7 planeaba como "Bloque 10": 8 hallazgos auditados, 4 cerrados formalmente, 1 fuera de alcance por decisión de Product Owner, 1 mitigado con bypass conocido pendiente de confirmación externa (Railway). **Cerrado.** El "Bloque 11 — Panel de Administración de Organización" que planeaba originalmente la sección 7 **no se construyó todavía** — el número ya se usó para otra cosa, pero esa capacidad sigue siendo trabajo real pendiente (ver actualización de la sección 10).
+- **Bloque A** (A-00 a A-04) — serie aparte, no de producto sino de infraestructura/operación (backup verificado con restauración real, CI mínimo, observabilidad mínima, limpieza de repositorio). **Cerrado.** No estaba anticipada en este roadmap.
+
+---
+
 ## 1. Estado actual del producto (breve)
 
 SDC es, hoy, un sistema transaccional completo y en producción real para una empresa de intermediación de transporte de cereales, con un motor analítico propio (Centro de Inteligencia) y, desde el cierre de Bloque 8, una arquitectura de datos multiempresa real, verificada de punta a punta con una segunda organización de prueba a través del sistema completo (`ACTA_CIERRE_BLOQUE8.md`). Es, en términos de `FASEIII_PRODUCTIZACION_SDC.md`, un sistema técnicamente preparado para ser multiempresa, pero **todavía operado, no todavía autoservicio**: cada organización nueva se da de alta hoy por acceso directo a la base, no por ningún flujo del producto — el mismo hecho que la propia Fase F tuvo que sortear para poder ejecutarse.
@@ -118,19 +127,19 @@ Ninguna de estas es una sorpresa — todas están ya nombradas, con distinto niv
 
 ## 7. Próximos bloques propuestos (solo definición, no apertura)
 
-### Bloque 9 — Administración de Organización y Usuarios
+### Bloque 9 — Administración de Organización y Usuarios `[✅ ejecutado, ver actualización 2026-07-29 arriba]`
 - **Objetivo:** eliminar la dependencia de acceso directo a la base para dar de alta una organización o un usuario.
 - **Alcance:** CRUD completo de `Usuario` (hoy solo lectura); flujo de alta de `Organizacion` con su primer usuario administrador; asignación/edición de roles dentro de la propia organización.
 - **Dependencia:** ninguna — se apoya directamente en la arquitectura ya cerrada en Bloque 8.
 - **Impacto esperado:** condición habilitante para todo lo demás de esta sección — es, con evidencia ya demostrada dos veces en este proyecto, el bloqueo más concreto que existe hoy para operar como producto.
 
-### Bloque 10 — Endurecimiento de seguridad remanente
+### Bloque 10 — Endurecimiento de seguridad remanente `[✅ ejecutado como "Bloque 11" real, ver actualización 2026-07-29 arriba]`
 - **Objetivo:** cerrar la deuda técnica de seguridad identificada en `ACTA_CIERRE_BLOQUE8.md` y en la auditoría previa.
 - **Alcance:** corrección de los 3 endpoints con código de estado incorrecto ante acceso cruzado; cierre del acceso runtime a `$queryRaw*`/`$executeRaw*` en el cliente de nivel superior; completar la lista de claves de escritura anidada detectadas (`create`/`createMany`); evaluar una red de seguridad automática para `ORGANIZACIONAL_MODELS`.
 - **Dependencia:** ninguna — es independiente y puede avanzar en paralelo con cualquier otro bloque.
 - **Impacto esperado:** cierra formalmente la superficie de riesgo conocida de la arquitectura multiempresa, sin dejar deuda técnica de seguridad documentada y no resuelta.
 
-### Bloque 11 — Panel de Administración de Organización
+### Bloque 11 — Panel de Administración de Organización `[el número ya se usó para "Endurecimiento de Seguridad" real — esta capacidad sigue sin construirse, ver actualización 2026-07-29 arriba]`
 - **Objetivo:** primera superficie de autoservicio real para un cliente.
 - **Alcance:** pantallas para gestionar usuarios propios, roles, datos básicos de la organización (nombre, branding mínimo).
 - **Dependencia:** Bloque 9 completo.
@@ -201,6 +210,8 @@ Mobile, IA aplicada sobre el Centro de Inteligencia, Ecosistema/Marketplace de i
 
 ## 10. Recomendación concreta
 
-**El próximo bloque del proyecto debe ser el Bloque 9 — Administración de Organización y Usuarios.**
+**Recomendación original (2026-07-13): el próximo bloque debía ser el Bloque 9 — Administración de Organización y Usuarios.** Ya se ejecutó (ver actualización 2026-07-29 al inicio del documento).
 
-No es una elección entre varias opciones igualmente válidas — es la única capacidad de esta lista que ya demostró ser un bloqueo real, dos veces, con evidencia concreta y reciente: en la auditoría de productización de Bloque 8, y de nuevo en la ejecución misma de la Fase F, donde crear la segunda organización de prueba exigió exactamente el mismo procedimiento manual de acceso directo a la base que un cliente real necesitaría hoy. Toda la arquitectura de aislamiento que Bloque 8 construyó y validó queda, sin el Bloque 9, inaccesible para cualquiera que no sea el propio equipo técnico con acceso a la base de datos — la infraestructura multiempresa existe, pero todavía no hay ninguna puerta de entrada para usarla como producto.
+**Actualización 2026-07-29 — estado real y recomendación vigente:** desde entonces se cerraron también Grupo Económico (10.1-10.6), Endurecimiento de Seguridad (Bloque 11 real) y Bloque A completo (infraestructura/operación). De las 4 capacidades marcadas "Imprescindible" en la sección 6, la única que **todavía no se construyó** es el **Panel de administración mínimo** (gestión de los propios usuarios y datos de la organización) — lo que este documento originalmente planeaba como "Bloque 11 — Panel de Administración de Organización" (sección 7), antes de que ese número se usara para seguridad. Su única dependencia declarada (Bloque 9) ya está cerrada, por lo que no tiene ningún bloqueo pendiente para empezar.
+
+**El próximo bloque de producto recomendado es, por lo tanto, el Panel de Administración de Organización** (alcance ya definido en la sección 7, entrada "Bloque 11"): pantallas para gestionar usuarios propios, roles, datos básicos de la organización. Sigue siendo, con la misma lógica que ya usaba este documento, la pieza que falta para que dar de alta y administrar una organización deje de depender de acceso técnico directo a la base.
