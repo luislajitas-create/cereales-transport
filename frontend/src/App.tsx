@@ -1,6 +1,7 @@
 import { Routes, Route } from "react-router-dom";
 import { ConfirmProvider } from "./components/ConfirmDialog";
 import Layout from "./components/Layout";
+import ProtectedRoute from "./components/ProtectedRoute";
 import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
 import Viajes from "./pages/Viajes";
@@ -57,12 +58,14 @@ export default function App() {
           <Route path="/inteligencia/benchmarking" element={<Benchmarking />} />
           <Route path="/perfil" element={<Perfil />} />
           <Route path="/organizacion" element={<Organizacion />} />
-          <Route path="/administracion/usuarios" element={<Usuarios />} />
-          <Route path="/administracion/auditoria" element={<AuditoriaAdministrativa />} />
-          <Route path="/administracion/grupo-economico" element={<GrupoEconomico />} />
-          <Route path="/administracion/pago-consolidado" element={<PagosConsolidados />} />
-          <Route path="/administracion/pago-consolidado/nuevo" element={<PagoConsolidadoNuevo />} />
-          <Route path="/administracion/pago-consolidado/:id" element={<PagoConsolidadoDetalle />} />
+          <Route element={<ProtectedRoute roles={["ADMINISTRADOR"]} />}>
+            <Route path="/administracion/usuarios" element={<Usuarios />} />
+            <Route path="/administracion/auditoria" element={<AuditoriaAdministrativa />} />
+            <Route path="/administracion/grupo-economico" element={<GrupoEconomico />} />
+            <Route path="/administracion/pago-consolidado" element={<PagosConsolidados />} />
+            <Route path="/administracion/pago-consolidado/nuevo" element={<PagoConsolidadoNuevo />} />
+            <Route path="/administracion/pago-consolidado/:id" element={<PagoConsolidadoDetalle />} />
+          </Route>
         </Route>
       </Routes>
     </ConfirmProvider>

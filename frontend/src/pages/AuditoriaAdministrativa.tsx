@@ -66,14 +66,8 @@ export default function AuditoriaAdministrativa() {
 
   const totalPaginas = Math.max(1, Math.ceil(total / limite));
 
-  if (usuario?.rol !== "ADMINISTRADOR") {
-    return (
-      <div>
-        <div className="page-header"><h1>Auditoría Administrativa</h1></div>
-        <div className="error-banner">No tenés permiso para ver esta sección.</div>
-      </div>
-    );
-  }
+  // El guard por rol vive ahora en <ProtectedRoute> (App.tsx) — esta pantalla ya no monta si
+  // el rol no es ADMINISTRADOR.
 
   return (
     <div>

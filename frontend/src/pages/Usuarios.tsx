@@ -206,15 +206,8 @@ export default function Usuarios() {
     );
   }
 
-  if (usuario?.rol !== "ADMINISTRADOR") {
-    return (
-      <div>
-        <div className="page-header"><h1>Administración de Usuarios</h1></div>
-        <div className="error-banner">No tenés permiso para ver esta sección.</div>
-      </div>
-    );
-  }
-
+  // El guard por rol vive ahora en <ProtectedRoute> (App.tsx) — esta pantalla ya no monta si
+  // el rol no es ADMINISTRADOR.
   return (
     <div>
       <div className="page-header">
