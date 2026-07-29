@@ -9,7 +9,7 @@ import { LoginDto } from "./dto/login.dto";
 import { RecuperarContrasenaDto } from "./dto/recuperar-contrasena.dto";
 import { RestablecerContrasenaDto } from "./dto/restablecer-contrasena.dto";
 import { CambiarOrganizacionDto } from "./dto/cambiar-organizacion.dto";
-import { LOGIN_THROTTLE_TTL_MS, LOGIN_THROTTLE_LIMITE } from "./auth.module";
+import { LOGIN_THROTTLE_TTL_MS, LOGIN_THROTTLE_LIMITE } from "./login-throttle.constants";
 
 const MENSAJE_RECUPERACION = "Si el email corresponde a una cuenta, vas a recibir un enlace para recuperar el acceso.";
 

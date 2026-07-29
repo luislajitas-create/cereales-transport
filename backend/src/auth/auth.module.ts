@@ -9,13 +9,16 @@ import { AuthController } from "./auth.controller";
 import { InvitacionesPublicasController } from "./invitaciones-publicas.controller";
 import { OrganizacionesPublicasController } from "./organizaciones-publicas.controller";
 import { JwtStrategy } from "./jwt.strategy";
+import { LOGIN_THROTTLE_LIMITE, LOGIN_THROTTLE_TTL_MS } from "./login-throttle.constants";
 
 // Bloque 11, H-07: registrado local a AuthModule, no en AppModule — deja el guard disponible
 // para inyección, pero no lo aplica en ningún lado por sí solo (eso lo decide cada controller
 // con @UseGuards). Solo AuthController.login() lo usa (ver LoginThrottlerGuard en
 // auth.controller.ts) — el resto de la API queda sin cambios.
-export const LOGIN_THROTTLE_TTL_MS = 60_000;
-export const LOGIN_THROTTLE_LIMITE = 10;
+//
+// LOGIN_THROTTLE_TTL_MS/LIMITE viven en login-throttle.constants.ts, no acá — evita el import
+// circular con auth.controller.ts (hallazgo confirmado durante la validación del bloque de Alta
+// de Organización, corregido en este mismo commit).
 
 @Module({
   imports: [
