@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { api } from "../api/client";
 
 const TABS = [
@@ -32,7 +33,13 @@ const TABS = [
 ];
 
 export default function Catalogos() {
-  const [tab, setTab] = useState(TABS[0]);
+  // Permite abrir una pestaña específica por URL (?tab=ubicaciones) — usado por el Asistente de
+  // Puesta en Marcha (Dashboard.tsx) para llevar directo a la pestaña correcta en vez de
+  // depender de que el usuario la busque a mano. Sin parámetro, o con uno que no coincide con
+  // ningún tab conocido, se comporta exactamente igual que antes (TABS[0]).
+  const [searchParams] = useSearchParams();
+  const tabInicial = TABS.find((t) => t.key === searchParams.get("tab")) || TABS[0];
+  const [tab, setTab] = useState(tabInicial);
   const [items, setItems] = useState<any[]>([]);
   const [nuevo, setNuevo] = useState<any>({});
   const [error, setError] = useState("");

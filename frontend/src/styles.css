@@ -66,6 +66,16 @@ a { color: var(--accent); text-decoration: none; }
 .kpi-card .value { font-size: 1.6rem; font-weight: 700; color: var(--primary); margin-top: 0.3rem; }
 .kpi-card .sub { font-size: 0.78rem; color: #888; margin-top: 0.2rem; }
 
+.progreso-barra { background: var(--border); border-radius: 6px; height: 10px; overflow: hidden; margin: 0.6rem 0 1rem; }
+.progreso-relleno { background: var(--primary); height: 100%; border-radius: 6px; transition: width 0.3s ease; }
+.requisitos-lista { list-style: none; padding: 0; margin: 0 0 1rem; display: flex; flex-direction: column; gap: 0.3rem; }
+.requisitos-lista li { display: flex; align-items: center; justify-content: space-between; padding: 0.4rem 0; border-bottom: 1px solid var(--border); }
+.requisitos-lista li:last-child { border-bottom: none; }
+.requisitos-lista .requisito-nombre { display: flex; align-items: center; gap: 0.5rem; }
+.requisitos-lista .requisito-check { font-weight: 700; }
+.requisitos-lista li.cumplido .requisito-check { color: var(--success); }
+.requisitos-lista li.pendiente .requisito-check { color: var(--warning); }
+
 table { width: 100%; border-collapse: collapse; background: white; border-radius: 8px; overflow: hidden; }
 thead th { background: var(--primary); color: white; text-align: left; padding: 0.6rem 0.8rem; font-size: 0.8rem; }
 tbody td { padding: 0.55rem 0.8rem; border-bottom: 1px solid var(--border); font-size: 0.85rem; }
