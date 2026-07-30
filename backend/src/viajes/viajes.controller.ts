@@ -108,6 +108,7 @@ export class ViajesController {
     @Query("transportistaId") transportistaId?: string,
     @Query("estado") estado?: string,
     @Query("cerealId") cerealId?: string,
+    @Query("q") q?: string,
   ) {
     const where: any = {};
     if (desde || hasta) {
@@ -119,6 +120,34 @@ export class ViajesController {
     if (transportistaId) where.transportistaId = transportistaId;
     if (estado) where.estado = estado;
     if (cerealId) where.cerealId = cerealId;
+    // Listado Operativo, Bloque L2 (AUDITORIA_DISENO_VIAJES2.0_L2_BUSQUEDA.md, Paso 1, ajustado
+    // tras validación): "q" se combina con AND respecto a los filtros de arriba (es una clave
+    // más del mismo "where"). Si "q" es puramente numérico, un texto corto (1-3 dígitos) casi
+    // siempre corresponde a un N° de Viaje que el usuario ya conoce — buscarlo además como
+    // substring de CTG/Carta de Porte generaba ruido (p. ej. "3" matcheaba cualquier CTG que
+    // tuviera un "3" en cualquier posición). Por eso, con q numérico de menos de 4 caracteres se
+    // busca únicamente por igualdad exacta de numeroViaje; con 4 o más, se agrega también el
+    // contains de CTG/Carta de Porte (ya no hay ambigüedad real con un número tan específico).
+    if (q && q.trim()) {
+      const texto = q.trim();
+      const esNumerico = /^\d+$/.test(texto);
+      if (esNumerico) {
+        where.OR = [
+          { numeroViaje: Number(texto) },
+          ...(texto.length >= 4
+            ? [
+                { ctg: { contains: texto, mode: "insensitive" } },
+                { cartaPorte: { contains: texto, mode: "insensitive" } },
+              ]
+            : []),
+        ];
+      } else {
+        where.OR = [
+          { ctg: { contains: texto, mode: "insensitive" } },
+          { cartaPorte: { contains: texto, mode: "insensitive" } },
+        ];
+      }
+    }
 
     return this.prisma.viaje.findMany({ where, select: selectViajeListado, orderBy: { fecha: "desc" } });
   }

@@ -9,7 +9,7 @@ function fmtMoney(n: number) {
 export default function Viajes() {
   const [viajes, setViajes] = useState<any[]>([]);
   const [clientes, setClientes] = useState<any[]>([]);
-  const [filtros, setFiltros] = useState({ desde: "", hasta: "", clienteId: "", estado: "" });
+  const [filtros, setFiltros] = useState({ desde: "", hasta: "", clienteId: "", estado: "", q: "" });
   const [error, setError] = useState("");
 
   function cargar() {
@@ -38,6 +38,15 @@ export default function Viajes() {
       {error && <div className="error-banner">{error}</div>}
 
       <div className="filters">
+        <div className="field">
+          <label>Buscar</label>
+          <input
+            type="text"
+            placeholder="Buscar por CTG, Carta de Porte o Nº de Viaje"
+            value={filtros.q}
+            onChange={(e) => setFiltros({ ...filtros, q: e.target.value })}
+          />
+        </div>
         <div className="field">
           <label>Desde</label>
           <input type="date" value={filtros.desde} onChange={(e) => setFiltros({ ...filtros, desde: e.target.value })} />
