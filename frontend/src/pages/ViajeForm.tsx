@@ -1,16 +1,21 @@
 import { useEffect, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { api } from "../api/client";
 import { useUnsavedChangesGuard } from "../hooks/useUnsavedChangesGuard";
 import { useAsyncAction } from "../hooks/useAsyncAction";
 
 export default function ViajeForm() {
   const navigate = useNavigate();
+  const location = useLocation();
   // Núcleo Viajes 2.0, Tarea 3: mismo formulario para crear y editar — evita una segunda
   // implementación. Con :id (ruta /viajes/:id/editar) precarga el Viaje existente y guarda con
   // PATCH; sin :id (ruta /viajes/nuevo) se comporta exactamente igual que antes.
   const { id } = useParams();
   const editando = Boolean(id);
+  // Listado Operativo, Bloque L3 (ajuste): ViajeDetalle.tsx pasa su propio "volverA" (la URL del
+  // listado filtrado) como state al entrar acá vía "Editar viaje". Simplemente se retransmite tal
+  // cual al volver — este componente no necesita conocer su forma, solo reenviarlo.
+  const volverA = location.state?.volverA;
   const [dirty, setDirty] = useState(false);
   useUnsavedChangesGuard(dirty);
   const [cereales, setCereales] = useState<any[]>([]);
@@ -113,7 +118,7 @@ export default function ViajeForm() {
         if (editando) {
           const { data } = await api.patch(`/viajes/${id}`, payload);
           setDirty(false);
-          navigate(`/viajes/${id}`);
+          navigate(`/viajes/${id}`, { state: { volverA } });
           return data;
         }
         const { data } = await api.post("/viajes", payload);

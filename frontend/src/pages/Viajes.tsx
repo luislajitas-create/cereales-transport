@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation, useSearchParams } from "react-router-dom";
 import { api } from "../api/client";
 
 function fmtMoney(n: number) {
@@ -7,9 +7,20 @@ function fmtMoney(n: number) {
 }
 
 export default function Viajes() {
+  // Listado Operativo, Bloque L3 (AUDITORIA_DISENO_VIAJES2.0_L3_PERSISTENCIA_LISTADO.md, v1):
+  // los filtros y la búsqueda se inicializan desde la URL (mismo patrón que Catalogos.tsx con
+  // ?tab=) para que un refresh o un link directo reproduzcan el mismo listado filtrado.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const location = useLocation();
   const [viajes, setViajes] = useState<any[]>([]);
   const [clientes, setClientes] = useState<any[]>([]);
-  const [filtros, setFiltros] = useState({ desde: "", hasta: "", clienteId: "", estado: "", q: "" });
+  const [filtros, setFiltros] = useState({
+    desde: searchParams.get("desde") || "",
+    hasta: searchParams.get("hasta") || "",
+    clienteId: searchParams.get("clienteId") || "",
+    estado: searchParams.get("estado") || "",
+    q: searchParams.get("q") || "",
+  });
   const [error, setError] = useState("");
 
   function cargar() {
@@ -21,6 +32,18 @@ export default function Viajes() {
       .get("/viajes", { params })
       .then((res) => setViajes(res.data))
       .catch(() => setError("No se pudieron cargar los viajes"));
+  }
+
+  // Sincroniza la URL con los filtros vigentes al momento de aplicar — "replace" para no dejar
+  // una entrada de historial por cada clic en "Filtrar" (evitaría que "atrás" quede atascado
+  // deshaciendo filtros en vez de volver a la pantalla anterior real).
+  function aplicarFiltros() {
+    const params: Record<string, string> = {};
+    Object.entries(filtros).forEach(([k, v]) => {
+      if (v) params[k] = v;
+    });
+    setSearchParams(params, { replace: true });
+    cargar();
   }
 
   useEffect(() => {
@@ -73,7 +96,7 @@ export default function Viajes() {
             ))}
           </select>
         </div>
-        <button className="btn secondary" onClick={cargar}>Filtrar</button>
+        <button className="btn secondary" onClick={aplicarFiltros}>Filtrar</button>
       </div>
 
       <table>
@@ -94,7 +117,13 @@ export default function Viajes() {
         <tbody>
           {viajes.map((v) => (
             <tr key={v.id}>
-              <td><Link to={`/viajes/${v.id}`}>{v.numeroViaje}</Link></td>
+              <td>
+                {/* Bloque L3: le pasa al Detalle la URL exacta del listado (con los filtros/
+                    búsqueda vigentes) para que el link "Volver al listado" sepa a dónde volver. */}
+                <Link to={`/viajes/${v.id}`} state={{ volverA: location.pathname + location.search }}>
+                  {v.numeroViaje}
+                </Link>
+              </td>
               <td>{new Date(v.fecha).toLocaleDateString()}</td>
               <td>{v.ctg}</td>
               <td>{v.cereal?.nombre}</td>

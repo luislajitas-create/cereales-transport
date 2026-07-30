@@ -21,6 +21,11 @@ export default function ViajeDetalle() {
   // no reaparece, que es lo que se quiere: es un aviso de "recién creado", no un estado del Viaje.
   const [success, setSuccess] = useState(location.state?.creado ? "✅ Viaje creado correctamente." : "");
   const [busy, setBusy] = useState(false);
+  // Listado Operativo, Bloque L3 (AUDITORIA_DISENO_VIAJES2.0_L3_PERSISTENCIA_LISTADO.md, v1):
+  // Viajes.tsx pasa la URL exacta desde la que se navegó (con filtros/búsqueda) como state al
+  // entrar acá. Si no existe (acceso directo, o el state se perdió en un refresh), cae a /viajes
+  // sin filtros — mismo comportamiento que hoy, no una regresión.
+  const volverA = location.state?.volverA || "/viajes";
 
   function cargar() {
     api.get(`/viajes/${id}`).then((res) => setViaje(res.data)).catch(() => setError("No se pudo cargar el viaje"));
@@ -76,6 +81,9 @@ export default function ViajeDetalle() {
 
   return (
     <div>
+      <p style={{ marginBottom: "0.6rem" }}>
+        <Link to={volverA}>← Volver al listado</Link>
+      </p>
       <div className="page-header">
         <h1>Viaje N° {viaje.numeroViaje}</h1>
         <span className={`badge ${viaje.estado}`}>{viaje.estado}</span>
@@ -108,7 +116,9 @@ export default function ViajeDetalle() {
               backend permite editar "observaciones"/"productorId" incluso con el viaje
               CANCELADO o ya facturado/liquidado (ver update() en viajes.controller.ts); los
               demás campos quedan bloqueados ahí mismo, con el mensaje explicando el motivo. */}
-          <Link className="btn secondary" to={`/viajes/${id}/editar`}>Editar viaje</Link>
+          {/* Bloque L3 (ajuste): retransmite el mismo volverA que este Detalle recibió, para que
+              ViajeForm.tsx pueda devolverlo intacto al guardar y volver acá. */}
+          <Link className="btn secondary" to={`/viajes/${id}/editar`} state={{ volverA }}>Editar viaje</Link>
           {viaje.estado !== "CANCELADO" && viaje.estado !== "DESCARGADO" && (
             <>
               {siguienteEstado && (
