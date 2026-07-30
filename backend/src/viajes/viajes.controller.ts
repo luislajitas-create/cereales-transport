@@ -240,6 +240,13 @@ export class ViajesController {
 
     const data: any = { ...body };
     delete data.estado;
+    // Núcleo Viajes 2.0, Tarea 2: create() ya normaliza acopladoId/productorId ("" -> null)
+    // antes de escribir (ver create() más arriba); update() no lo hacía. Sin esto, el formulario
+    // de edición enviando "" para "Sin acoplado"/"Sin productor" rompía la FK contra Vehiculo/
+    // Productor en vez de guardar null. No cambia ninguna regla de negocio: mismo criterio que
+    // ya existía en create(), aplicado acá para que el mismo formulario sirva para editar.
+    if (data.acopladoId !== undefined) data.acopladoId = data.acopladoId || null;
+    if (data.productorId !== undefined) data.productorId = data.productorId || null;
     if (data.toneladas || data.tarifaTonelada) {
       const toneladas = Number(data.toneladas ?? actual.toneladas);
       const tarifa = Number(data.tarifaTonelada ?? actual.tarifaTonelada);
@@ -306,19 +313,24 @@ export class ViajesController {
   }
 
   private async aplicarCambioEstado(viaje: any, nuevo: string, user: any, motivo?: string) {
-    const actualizado = await this.prisma.viaje.update({
-      where: { id: viaje.id },
-      data: { estado: nuevo as any },
-      include: includeViaje,
+    // Núcleo Viajes 2.0, Tarea 1: mismo criterio que create() (ver comentario de Hardening más
+    // arriba) — antes eran dos escrituras sin transacción; un fallo entre ambas podía dejar el
+    // Viaje en su nuevo estado sin la fila de HistorialEstadoViaje que lo explica.
+    return this.prisma.$transaction(async (tx) => {
+      const actualizado = await tx.viaje.update({
+        where: { id: viaje.id },
+        data: { estado: nuevo as any },
+        include: includeViaje,
+      });
+      await tx.historialEstadoViaje.create({
+        data: {
+          viajeId: viaje.id,
+          estadoAnterior: viaje.estado,
+          estadoNuevo: nuevo + (motivo ? ` (motivo: ${motivo})` : ""),
+          usuarioId: user?.id || null,
+        },
+      });
+      return actualizado;
     });
-    await this.prisma.historialEstadoViaje.create({
-      data: {
-        viajeId: viaje.id,
-        estadoAnterior: viaje.estado,
-        estadoNuevo: nuevo + (motivo ? ` (motivo: ${motivo})` : ""),
-        usuarioId: user?.id || null,
-      },
-    });
-    return actualizado;
   }
 }

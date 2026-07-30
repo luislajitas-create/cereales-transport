@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useLocation, useParams } from "react-router-dom";
+import { Link, useLocation, useParams } from "react-router-dom";
 import { api } from "../api/client";
 import { useConfirm } from "../components/ConfirmDialog";
 
@@ -103,16 +103,23 @@ export default function ViajeDetalle() {
         </div>
         {viaje.observaciones && <p className="muted">Obs: {viaje.observaciones}</p>}
 
-        {viaje.estado !== "CANCELADO" && viaje.estado !== "DESCARGADO" && (
-          <div className="actions-row">
-            {siguienteEstado && (
-              <button className="btn success" disabled={busy} onClick={avanzarEstado}>
-                Avanzar a {siguienteEstado}
-              </button>
-            )}
-            <button className="btn danger" disabled={busy} onClick={cancelarViaje}>Cancelar viaje</button>
-          </div>
-        )}
+        <div className="actions-row">
+          {/* Núcleo Viajes 2.0, Tarea 4: siempre visible, sin condicionar por estado — el
+              backend permite editar "observaciones"/"productorId" incluso con el viaje
+              CANCELADO o ya facturado/liquidado (ver update() en viajes.controller.ts); los
+              demás campos quedan bloqueados ahí mismo, con el mensaje explicando el motivo. */}
+          <Link className="btn secondary" to={`/viajes/${id}/editar`}>Editar viaje</Link>
+          {viaje.estado !== "CANCELADO" && viaje.estado !== "DESCARGADO" && (
+            <>
+              {siguienteEstado && (
+                <button className="btn success" disabled={busy} onClick={avanzarEstado}>
+                  Avanzar a {siguienteEstado}
+                </button>
+              )}
+              <button className="btn danger" disabled={busy} onClick={cancelarViaje}>Cancelar viaje</button>
+            </>
+          )}
+        </div>
       </div>
 
       <div className="card">

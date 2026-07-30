@@ -1,11 +1,16 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import { api } from "../api/client";
 import { useUnsavedChangesGuard } from "../hooks/useUnsavedChangesGuard";
 import { useAsyncAction } from "../hooks/useAsyncAction";
 
 export default function ViajeForm() {
   const navigate = useNavigate();
+  // Núcleo Viajes 2.0, Tarea 3: mismo formulario para crear y editar — evita una segunda
+  // implementación. Con :id (ruta /viajes/:id/editar) precarga el Viaje existente y guarda con
+  // PATCH; sin :id (ruta /viajes/nuevo) se comporta exactamente igual que antes.
+  const { id } = useParams();
+  const editando = Boolean(id);
   const [dirty, setDirty] = useState(false);
   useUnsavedChangesGuard(dirty);
   const [cereales, setCereales] = useState<any[]>([]);
@@ -20,7 +25,7 @@ export default function ViajeForm() {
   // hook) — dos clics disparados en el mismo tick, antes del primer re-render, podían pasar
   // ambos y crear dos Viajes idénticos. Mismo patrón que ya usan Usuarios.tsx y el resto del
   // proyecto para acciones que mutan datos.
-  const crearAccion = useAsyncAction();
+  const accion = useAsyncAction();
 
   const [form, setForm] = useState({
     fecha: new Date().toISOString().slice(0, 10),
@@ -66,6 +71,33 @@ export default function ViajeForm() {
     api.get("/vehiculos", { params: { transportistaId: form.transportistaId } }).then((res) => setVehiculos(res.data));
   }, [form.transportistaId]);
 
+  useEffect(() => {
+    if (!id) return;
+    api
+      .get(`/viajes/${id}`)
+      .then(({ data }) => {
+        setForm({
+          fecha: data.fecha.slice(0, 10),
+          cartaPorte: data.cartaPorte,
+          ctg: data.ctg,
+          cerealId: data.cerealId,
+          clienteId: data.clienteId,
+          productorId: data.productorId || "",
+          transportistaId: data.transportistaId,
+          choferId: data.choferId,
+          camionId: data.camionId,
+          acopladoId: data.acopladoId || "",
+          origenId: data.origenId,
+          destinoId: data.destinoId,
+          toneladas: String(data.toneladas),
+          tarifaTonelada: String(data.tarifaTonelada),
+          observaciones: data.observaciones || "",
+        });
+      })
+      .catch(() => accion.setError("No se pudo cargar el viaje a editar"));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id]);
+
   function update(field: string, value: string) {
     setDirty(true);
     setForm((f) => ({ ...f, [field]: value }));
@@ -75,9 +107,15 @@ export default function ViajeForm() {
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    crearAccion.run(
+    accion.run(
       async () => {
         const payload: any = { ...form, productorId: form.productorId || null, acopladoId: form.acopladoId || null };
+        if (editando) {
+          const { data } = await api.patch(`/viajes/${id}`, payload);
+          setDirty(false);
+          navigate(`/viajes/${id}`);
+          return data;
+        }
         const { data } = await api.post("/viajes", payload);
         setDirty(false);
         // UX Refinement (First Trip): estado de navegación, no persistido — ViajeDetalle.tsx lo
@@ -86,16 +124,16 @@ export default function ViajeForm() {
         navigate(`/viajes/${data.id}`, { state: { creado: true } });
         return data;
       },
-      { errorMessage: "No se pudo crear el viaje" },
+      { errorMessage: editando ? "No se pudo actualizar el viaje" : "No se pudo crear el viaje" },
     );
   }
 
   return (
     <div>
       <div className="page-header">
-        <h1>Nuevo viaje</h1>
+        <h1>{editando ? "Editar viaje" : "Nuevo viaje"}</h1>
       </div>
-      {crearAccion.error && <div className="error-banner">{crearAccion.error}</div>}
+      {accion.error && <div className="error-banner">{accion.error}</div>}
       <form className="card" onSubmit={handleSubmit}>
         <div className="form-grid">
           <div className="field">
@@ -197,7 +235,9 @@ export default function ViajeForm() {
           <textarea rows={3} value={form.observaciones} onChange={(e) => update("observaciones", e.target.value)} />
         </div>
         <div className="actions-row">
-          <button className="btn" type="submit" disabled={crearAccion.busy}>{crearAccion.busy ? "Guardando..." : "Crear viaje"}</button>
+          <button className="btn" type="submit" disabled={accion.busy}>
+            {accion.busy ? "Guardando..." : editando ? "Guardar cambios" : "Crear viaje"}
+          </button>
         </div>
       </form>
     </div>
