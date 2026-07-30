@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useParams } from "react-router-dom";
+import { useLocation, useParams } from "react-router-dom";
 import { api } from "../api/client";
 import { useConfirm } from "../components/ConfirmDialog";
 
@@ -11,10 +11,15 @@ function fmtMoney(n: number) {
 
 export default function ViajeDetalle() {
   const { id } = useParams();
+  const location = useLocation();
   const confirm = useConfirm();
   const [viaje, setViaje] = useState<any>(null);
   const [error, setError] = useState("");
-  const [success, setSuccess] = useState("");
+  // UX Refinement (First Trip): "creado" viaja como state de navegación (no persistido, no
+  // querystring) desde ViajeForm.tsx tras el POST — se lee una sola vez al montar. Un refresh
+  // de esta pantalla pierde el state (comportamiento esperado de history.state) y el mensaje
+  // no reaparece, que es lo que se quiere: es un aviso de "recién creado", no un estado del Viaje.
+  const [success, setSuccess] = useState(location.state?.creado ? "✅ Viaje creado correctamente." : "");
   const [busy, setBusy] = useState(false);
 
   function cargar() {

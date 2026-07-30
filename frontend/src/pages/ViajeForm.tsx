@@ -80,7 +80,10 @@ export default function ViajeForm() {
         const payload: any = { ...form, productorId: form.productorId || null, acopladoId: form.acopladoId || null };
         const { data } = await api.post("/viajes", payload);
         setDirty(false);
-        navigate(`/viajes/${data.id}`);
+        // UX Refinement (First Trip): estado de navegación, no persistido — ViajeDetalle.tsx lo
+        // lee una sola vez al montar para mostrar el mensaje de éxito. No es un cambio de
+        // backend ni de la respuesta de la API, es puramente de react-router.
+        navigate(`/viajes/${data.id}`, { state: { creado: true } });
         return data;
       },
       { errorMessage: "No se pudo crear el viaje" },
@@ -141,6 +144,7 @@ export default function ViajeForm() {
               <option value="">Seleccionar...</option>
               {choferes.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
             </select>
+            {!form.transportistaId && <p className="muted">Seleccioná primero un Transportista.</p>}
           </div>
           <div className="field">
             <label>Camión</label>
@@ -148,6 +152,7 @@ export default function ViajeForm() {
               <option value="">Seleccionar...</option>
               {vehiculos.filter((v) => v.tipo === "CAMION").map((v) => <option key={v.id} value={v.id}>{v.patente}</option>)}
             </select>
+            {!form.transportistaId && <p className="muted">Seleccioná primero un Transportista.</p>}
           </div>
           <div className="field">
             <label>Acoplado (opcional)</label>
@@ -155,28 +160,32 @@ export default function ViajeForm() {
               <option value="">Sin acoplado</option>
               {vehiculos.filter((v) => v.tipo === "ACOPLADO").map((v) => <option key={v.id} value={v.id}>{v.patente}</option>)}
             </select>
+            {!form.transportistaId && <p className="muted">Seleccioná primero un Transportista.</p>}
           </div>
           <div className="field">
             <label>Origen</label>
+            {/* UX Refinement (First Trip): solo ayuda visual — excluye la Ubicación ya elegida
+                como Destino de las opciones de Origen. No es una validación nueva (el backend
+                sigue sin impedir origenId === destinoId, a propósito, sin tocarlo). */}
             <select value={form.origenId} onChange={(e) => update("origenId", e.target.value)} required>
               <option value="">Seleccionar...</option>
-              {ubicaciones.map((u) => <option key={u.id} value={u.id}>{u.nombre} ({u.tipo})</option>)}
+              {ubicaciones.filter((u) => u.id !== form.destinoId).map((u) => <option key={u.id} value={u.id}>{u.nombre} ({u.tipo})</option>)}
             </select>
           </div>
           <div className="field">
             <label>Destino</label>
             <select value={form.destinoId} onChange={(e) => update("destinoId", e.target.value)} required>
               <option value="">Seleccionar...</option>
-              {ubicaciones.map((u) => <option key={u.id} value={u.id}>{u.nombre} ({u.tipo})</option>)}
+              {ubicaciones.filter((u) => u.id !== form.origenId).map((u) => <option key={u.id} value={u.id}>{u.nombre} ({u.tipo})</option>)}
             </select>
           </div>
           <div className="field">
             <label>Toneladas</label>
-            <input type="number" step="0.01" value={form.toneladas} onChange={(e) => update("toneladas", e.target.value)} required />
+            <input type="number" step="0.01" min="0" value={form.toneladas} onChange={(e) => update("toneladas", e.target.value)} required />
           </div>
           <div className="field">
             <label>Tarifa por tonelada</label>
-            <input type="number" step="0.01" value={form.tarifaTonelada} onChange={(e) => update("tarifaTonelada", e.target.value)} required />
+            <input type="number" step="0.01" min="0" value={form.tarifaTonelada} onChange={(e) => update("tarifaTonelada", e.target.value)} required />
           </div>
           <div className="field">
             <label>Importe estimado</label>
