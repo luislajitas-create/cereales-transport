@@ -19,6 +19,26 @@ const includeViaje = {
   camion: true, acoplado: true, origen: true, destino: true,
 };
 
+// Listado Operativo, Bloque L1 (AUDITORIA_VIAJES2.0_LISTADO.md, hallazgo H-1): findAll() usaba
+// el mismo includeViaje que create()/update()/findOne() — 9 relaciones completas, cuando
+// Viajes.tsx solo lee estos campos puntuales (ver la tabla de la sección 1 de esa auditoría).
+// Las demás rutas (pendientes-facturar, findOne, create, update, cambiarEstado, cancelar) siguen
+// usando includeViaje sin cambios — quedan fuera de este bloque.
+const selectViajeListado = {
+  id: true,
+  numeroViaje: true,
+  fecha: true,
+  ctg: true,
+  toneladas: true,
+  importeTotal: true,
+  estado: true,
+  cereal: { select: { nombre: true } },
+  cliente: { select: { razonSocial: true } },
+  transportista: { select: { razonSocial: true } },
+  origen: { select: { nombre: true } },
+  destino: { select: { nombre: true } },
+};
+
 const VIAJE_NO_ENCONTRADO = "Viaje no encontrado";
 
 // Bloque 4.1: reglas de edición de Viaje según estado de facturación/liquidación.
@@ -100,7 +120,7 @@ export class ViajesController {
     if (estado) where.estado = estado;
     if (cerealId) where.cerealId = cerealId;
 
-    return this.prisma.viaje.findMany({ where, include: includeViaje, orderBy: { fecha: "desc" } });
+    return this.prisma.viaje.findMany({ where, select: selectViajeListado, orderBy: { fecha: "desc" } });
   }
 
   @Get("pendientes-facturar")
