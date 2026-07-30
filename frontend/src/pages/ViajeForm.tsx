@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api/client";
 import { useUnsavedChangesGuard } from "../hooks/useUnsavedChangesGuard";
+import { useAsyncAction } from "../hooks/useAsyncAction";
 
 export default function ViajeForm() {
   const navigate = useNavigate();
@@ -14,8 +15,12 @@ export default function ViajeForm() {
   const [choferes, setChoferes] = useState<any[]>([]);
   const [vehiculos, setVehiculos] = useState<any[]>([]);
   const [ubicaciones, setUbicaciones] = useState<any[]>([]);
-  const [error, setError] = useState("");
-  const [saving, setSaving] = useState(false);
+  // Hardening (First Trip): antes era useState("")/useState(false) manejado a mano, sin el
+  // guard de doble-submit por ref que useAsyncAction ya implementa (ver comentario del propio
+  // hook) — dos clics disparados en el mismo tick, antes del primer re-render, podían pasar
+  // ambos y crear dos Viajes idénticos. Mismo patrón que ya usan Usuarios.tsx y el resto del
+  // proyecto para acciones que mutan datos.
+  const crearAccion = useAsyncAction();
 
   const [form, setForm] = useState({
     fecha: new Date().toISOString().slice(0, 10),
@@ -68,20 +73,18 @@ export default function ViajeForm() {
 
   const importeEstimado = (Number(form.toneladas) || 0) * (Number(form.tarifaTonelada) || 0);
 
-  async function handleSubmit(e: React.FormEvent) {
+  function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    setError("");
-    setSaving(true);
-    try {
-      const payload: any = { ...form, productorId: form.productorId || null, acopladoId: form.acopladoId || null };
-      const { data } = await api.post("/viajes", payload);
-      setDirty(false);
-      navigate(`/viajes/${data.id}`);
-    } catch (err: any) {
-      setError(err?.response?.data?.message || "No se pudo crear el viaje");
-    } finally {
-      setSaving(false);
-    }
+    crearAccion.run(
+      async () => {
+        const payload: any = { ...form, productorId: form.productorId || null, acopladoId: form.acopladoId || null };
+        const { data } = await api.post("/viajes", payload);
+        setDirty(false);
+        navigate(`/viajes/${data.id}`);
+        return data;
+      },
+      { errorMessage: "No se pudo crear el viaje" },
+    );
   }
 
   return (
@@ -89,7 +92,7 @@ export default function ViajeForm() {
       <div className="page-header">
         <h1>Nuevo viaje</h1>
       </div>
-      {error && <div className="error-banner">{error}</div>}
+      {crearAccion.error && <div className="error-banner">{crearAccion.error}</div>}
       <form className="card" onSubmit={handleSubmit}>
         <div className="form-grid">
           <div className="field">
@@ -185,7 +188,7 @@ export default function ViajeForm() {
           <textarea rows={3} value={form.observaciones} onChange={(e) => update("observaciones", e.target.value)} />
         </div>
         <div className="actions-row">
-          <button className="btn" type="submit" disabled={saving}>{saving ? "Guardando..." : "Crear viaje"}</button>
+          <button className="btn" type="submit" disabled={crearAccion.busy}>{crearAccion.busy ? "Guardando..." : "Crear viaje"}</button>
         </div>
       </form>
     </div>

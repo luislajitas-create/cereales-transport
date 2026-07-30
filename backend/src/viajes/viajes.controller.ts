@@ -168,30 +168,38 @@ export class ViajesController {
     }
 
     const importeTotal = Number(body.toneladas) * Number(body.tarifaTonelada);
-    const viaje = await this.prisma.viaje.create({
-      data: {
-        fecha: new Date(body.fecha),
-        cartaPorte: body.cartaPorte,
-        ctg: body.ctg,
-        cerealId: body.cerealId,
-        clienteId: body.clienteId,
-        productorId: body.productorId || null,
-        transportistaId: body.transportistaId,
-        choferId: body.choferId,
-        camionId: body.camionId,
-        acopladoId: body.acopladoId || null,
-        origenId: body.origenId,
-        destinoId: body.destinoId,
-        toneladas: Number(body.toneladas),
-        tarifaTonelada: Number(body.tarifaTonelada),
-        importeTotal,
-        observaciones: body.observaciones || null,
-        creadoPorId: user?.id || null,
-      },
-      include: includeViaje,
-    });
-    await this.prisma.historialEstadoViaje.create({
-      data: { viajeId: viaje.id, estadoAnterior: null, estadoNuevo: "PENDIENTE", usuarioId: user?.id || null },
+    // Hardening (First Trip): antes eran dos escrituras secuenciales sin transacción — un
+    // fallo entre ambas podía dejar un Viaje real sin su primer HistorialEstadoViaje. Mismo
+    // patrón $transaction ya usado en el resto del proyecto (liquidaciones.controller.ts,
+    // facturas.controller.ts, grupo-economico/*) — la extensión de aislamiento por
+    // organización se propaga dentro de "tx" (ver organizacion-prisma.client.ts).
+    const viaje = await this.prisma.$transaction(async (tx) => {
+      const creado = await tx.viaje.create({
+        data: {
+          fecha: new Date(body.fecha),
+          cartaPorte: body.cartaPorte,
+          ctg: body.ctg,
+          cerealId: body.cerealId,
+          clienteId: body.clienteId,
+          productorId: body.productorId || null,
+          transportistaId: body.transportistaId,
+          choferId: body.choferId,
+          camionId: body.camionId,
+          acopladoId: body.acopladoId || null,
+          origenId: body.origenId,
+          destinoId: body.destinoId,
+          toneladas: Number(body.toneladas),
+          tarifaTonelada: Number(body.tarifaTonelada),
+          importeTotal,
+          observaciones: body.observaciones || null,
+          creadoPorId: user?.id || null,
+        },
+        include: includeViaje,
+      });
+      await tx.historialEstadoViaje.create({
+        data: { viajeId: creado.id, estadoAnterior: null, estadoNuevo: "PENDIENTE", usuarioId: user?.id || null },
+      });
+      return creado;
     });
     return viaje;
   }
