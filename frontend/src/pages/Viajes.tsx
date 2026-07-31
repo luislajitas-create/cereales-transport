@@ -1,9 +1,81 @@
 import { useEffect, useState } from "react";
 import { Link, useLocation, useSearchParams } from "react-router-dom";
 import { api } from "../api/client";
+import { useAsyncAction } from "../hooks/useAsyncAction";
+import { useAuth } from "../context/AuthContext";
+
+const ORDEN_ESTADOS = ["PENDIENTE", "ASIGNADO", "EN_CARGA", "CARGADO", "EN_TRANSITO", "DESCARGADO"];
 
 function fmtMoney(n: number) {
   return new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 0 }).format(n || 0);
+}
+
+// Listado Operativo, Bloque L4.1 (AUDITORIA_DISENO_VIAJES2.0_L4_ACCIONES_RAPIDAS.md): cada fila
+// tiene su propio useAsyncAction — mismo guard de doble clic por ref (no por estado) que ya usan
+// ViajeForm.tsx/Usuarios.tsx, acá aplicado por fila para que avanzar una fila no bloquee ni
+// contamine el busy/error de las demás.
+function FilaViaje({ viaje, onEstadoActualizado }: { viaje: any; onEstadoActualizado: (id: string, nuevoEstado: string) => void }) {
+  const location = useLocation();
+  const { usuario } = useAuth();
+  const accion = useAsyncAction();
+  // Ajuste UX tras validación de L4.1: mismo patrón ya usado en Organizacion.tsx (puedeEditar) —
+  // refleja exactamente los roles que @Roles("OPERACIONES", "ADMINISTRADOR") ya exige en
+  // create()/update()/cambiarEstado()/cancelar() de viajes.controller.ts (los cuatro comparten
+  // la misma lista). El backend sigue siendo la única autoridad real; esto es solo ocultar el
+  // botón para quien igual recibiría 403, en vez de mostrarlo y esperar el error. Reutilizable
+  // tal cual el día que se agregue el mismo criterio a Editar/Cancelar en el listado.
+  const puedeGestionarViajes = usuario?.rol === "OPERACIONES" || usuario?.rol === "ADMINISTRADOR";
+  // Mismo guard que ViajeDetalle.tsx: si el estado actual no está en ORDEN_ESTADOS (p. ej.
+  // CANCELADO), indexOf() da -1 y ORDEN_ESTADOS[-1 + 1] === ORDEN_ESTADOS[0] ("PENDIENTE") sin
+  // este chequeo — mostraría "Avanzar a PENDIENTE" para un viaje cancelado.
+  const idx = ORDEN_ESTADOS.indexOf(viaje.estado);
+  const siguiente = idx >= 0 && idx < ORDEN_ESTADOS.length - 1 ? ORDEN_ESTADOS[idx + 1] : null;
+
+  function avanzar() {
+    accion.run(
+      async () => {
+        const { data } = await api.post(`/viajes/${viaje.id}/estado`, { estado: siguiente });
+        // Actualiza solo esta fila en el estado del padre — no vuelve a pedir el listado
+        // completo para reflejar un cambio que ya conocemos por la propia respuesta.
+        onEstadoActualizado(viaje.id, data.estado);
+        return data;
+      },
+      { errorMessage: "No se pudo cambiar el estado" },
+    );
+  }
+
+  return (
+    <tr>
+      <td>
+        <Link to={`/viajes/${viaje.id}`} state={{ volverA: location.pathname + location.search }}>
+          {viaje.numeroViaje}
+        </Link>
+      </td>
+      <td>{new Date(viaje.fecha).toLocaleDateString()}</td>
+      <td>{viaje.ctg}</td>
+      <td>{viaje.cereal?.nombre}</td>
+      <td>{viaje.cliente?.razonSocial}</td>
+      <td>{viaje.transportista?.razonSocial}</td>
+      <td>{viaje.origen?.nombre} → {viaje.destino?.nombre}</td>
+      <td>{viaje.toneladas}</td>
+      <td>{fmtMoney(viaje.importeTotal)}</td>
+      <td>
+        <span className={`badge ${viaje.estado}`}>{viaje.estado}</span>
+        {accion.error && (
+          <div className="error-banner" style={{ marginTop: "0.3rem", fontSize: "0.75rem", padding: "0.3rem 0.5rem" }}>
+            {accion.error}
+          </div>
+        )}
+      </td>
+      <td>
+        {siguiente && puedeGestionarViajes && (
+          <button className="btn secondary" disabled={accion.busy} onClick={avanzar}>
+            {accion.busy ? "Avanzando..." : `Avanzar a ${siguiente}`}
+          </button>
+        )}
+      </td>
+    </tr>
+  );
 }
 
 export default function Viajes() {
@@ -11,7 +83,6 @@ export default function Viajes() {
   // los filtros y la búsqueda se inicializan desde la URL (mismo patrón que Catalogos.tsx con
   // ?tab=) para que un refresh o un link directo reproduzcan el mismo listado filtrado.
   const [searchParams, setSearchParams] = useSearchParams();
-  const location = useLocation();
   const [viajes, setViajes] = useState<any[]>([]);
   const [clientes, setClientes] = useState<any[]>([]);
   const [filtros, setFiltros] = useState({
@@ -50,6 +121,10 @@ export default function Viajes() {
     cargar();
     api.get("/clientes").then((res) => setClientes(res.data));
   }, []);
+
+  function actualizarEstadoFila(id: string, nuevoEstado: string) {
+    setViajes((prev) => prev.map((v) => (v.id === id ? { ...v, estado: nuevoEstado } : v)));
+  }
 
   return (
     <div>
@@ -112,31 +187,15 @@ export default function Viajes() {
             <th>Tn</th>
             <th>Importe</th>
             <th>Estado</th>
+            <th>Acciones</th>
           </tr>
         </thead>
         <tbody>
           {viajes.map((v) => (
-            <tr key={v.id}>
-              <td>
-                {/* Bloque L3: le pasa al Detalle la URL exacta del listado (con los filtros/
-                    búsqueda vigentes) para que el link "Volver al listado" sepa a dónde volver. */}
-                <Link to={`/viajes/${v.id}`} state={{ volverA: location.pathname + location.search }}>
-                  {v.numeroViaje}
-                </Link>
-              </td>
-              <td>{new Date(v.fecha).toLocaleDateString()}</td>
-              <td>{v.ctg}</td>
-              <td>{v.cereal?.nombre}</td>
-              <td>{v.cliente?.razonSocial}</td>
-              <td>{v.transportista?.razonSocial}</td>
-              <td>{v.origen?.nombre} → {v.destino?.nombre}</td>
-              <td>{v.toneladas}</td>
-              <td>{fmtMoney(v.importeTotal)}</td>
-              <td><span className={`badge ${v.estado}`}>{v.estado}</span></td>
-            </tr>
+            <FilaViaje key={v.id} viaje={v} onEstadoActualizado={actualizarEstadoFila} />
           ))}
           {viajes.length === 0 && (
-            <tr><td colSpan={10} className="muted">No hay viajes que coincidan con los filtros.</td></tr>
+            <tr><td colSpan={11} className="muted">No hay viajes que coincidan con los filtros.</td></tr>
           )}
         </tbody>
       </table>
