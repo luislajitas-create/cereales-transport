@@ -119,7 +119,15 @@ export default function ViajeDetalle() {
           {/* Bloque L3 (ajuste): retransmite el mismo volverA que este Detalle recibió, para que
               ViajeForm.tsx pueda devolverlo intacto al guardar y volver acá. */}
           <Link className="btn secondary" to={`/viajes/${id}/editar`} state={{ volverA }}>Editar viaje</Link>
-          {viaje.estado !== "CANCELADO" && viaje.estado !== "DESCARGADO" && (
+          {/* Sub-bloque L4.2 (AUDITORIA_DISENO_VIAJES2.0_L4.2_CANCELAR_LISTADO.md, Decisión A):
+              el backend nunca bloqueó cancelar un DESCARGADO por ese solo motivo — solo bloquea
+              si ya está facturado o liquidado (assertCancelacionPermitida), con su propio mensaje
+              explicativo. La condición "!== DESCARGADO" era una restricción extra del frontend,
+              sin respaldo en el backend; se quita para alinear la UI a la regla real. "Avanzar a
+              X" no se ve afectado: siguienteEstado ya es null para DESCARGADO (es el último
+              estado de ORDEN_ESTADOS), así que ese botón sigue sin aparecer ahí, sin necesidad de
+              una condición aparte. */}
+          {viaje.estado !== "CANCELADO" && (
             <>
               {siguienteEstado && (
                 <button className="btn success" disabled={busy} onClick={avanzarEstado}>
