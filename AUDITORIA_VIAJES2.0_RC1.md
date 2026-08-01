@@ -324,3 +324,21 @@ Justificación: los 6 bloques publicados son consistentes entre sí y con el bac
 **Builds y tests:** backend build OK, 11/11 suites, 82/82 tests verde. Frontend build OK, sin cambios (este bloque es backend-only).
 
 **Deuda remanente sin cambios:** H-8 a H-11 (deuda aceptable / mejora futura, sin bloqueantes).
+
+---
+
+## 18. H-8 — Extraer `FilaViaje` a componente propio (adenda)
+
+**H-8 (`FilaViaje` embebido en `Viajes.tsx`): cerrado.** Auditoría previa confirmó que `components/` es la ubicación ya usada por el frontend para piezas de UI extraídas (`Layout.tsx`, `ProtectedRoute.tsx`, ambas con `export default function`), que no existe un tipo `Viaje` reutilizable en el codebase (todo el módulo usa `any` de forma consistente, incluida la firma original de `FilaViaje`) y que `fmtMoney` (declarada en `Viajes.tsx`) solo la consumía `FilaViaje` — se movió con el componente en vez de quedar duplicada.
+
+**Archivo nuevo:** `frontend/src/components/FilaViaje.tsx`, con el componente movido tal cual (sin reescritura): `useLocation`, `useAuth`, `useConfirm`, las dos instancias de `useAsyncAction` (avanzar/cancelar), el estado y ref del menú contextual, el efecto de cierre por clic afuera, `avanzar()`/`cancelar()`, el guard de `ORDEN_ESTADOS` (importado de `utils/estadosViaje.ts`, fuente única de H-6, sin redeclarar) y el JSX completo de la fila. `fmtMoney` se movió sin cambios.
+
+**`Viajes.tsx`:** de 277 a 134 líneas. Conserva únicamente estado principal del listado, filtros, búsqueda, carga (`cargar`/`aplicarFiltros`), `actualizarEstadoFila`, tabla, encabezados y empty state. Imports reducidos a los que realmente usa (`useEffect`, `useState`, `Link`, `useSearchParams`, `api`, `useAuth`, `FilaViaje`); sin imports muertos verificado por build (`tsc -b`) sin errores.
+
+**Validación funcional:** no hay automatización de navegador disponible en este entorno (sin `chromium-cli` ni equivalente) — la interacción visual (apertura/cierre del menú, clic afuera, actualización del badge en el DOM) **no se validó de forma interactiva**. Se validó en su lugar, con backend y frontend locales corriendo (`npm run start:dev` / `npm run dev`) y contra un Viaje descartable creado y cancelado dentro del mismo bloque (`CTG-H8-VALIDACION`, sin tocar viajes existentes): `POST /viajes/:id/estado` y `POST /viajes/:id/cancelar` — las mismas dos llamadas que dispara `FilaViaje` — devuelven exactamente `{ id, estado }` como espera `onEstadoActualizado`, sin errores en los logs de ambos servidores (arranque único de Nest, sin excepciones fuera de las esperadas por credenciales de prueba deliberadamente inválidas). El diff de `FilaViaje.tsx` contra el bloque original es un movimiento literal (mismas líneas, mismos comentarios, cero cambios de lógica), lo que acota el riesgo de regresión visual/interactiva a prácticamente cero sin sustituir una validación real en DOM.
+
+**Regresiones:** no se re-probaron L1–L4.3/H-6/H-7/RC1.1–1.3 de forma completa — ninguno de esos bloques toca `Viajes.tsx` ni `FilaViaje` de forma que este movimiento pudiera afectar (cambio puramente de ubicación de código, sin tocar backend, contratos, permisos ni estilos).
+
+**Builds y tests:** backend sin cambios, 11/11 suites, 82/82 tests verde. Frontend build OK, sin errores TypeScript, 122 módulos (+1 por el archivo nuevo).
+
+**Deuda remanente sin cambios:** H-9 a H-11 (deuda aceptable / mejora futura, sin bloqueantes).

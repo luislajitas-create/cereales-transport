@@ -16,16 +16,18 @@ export default function ViajeDetalle() {
   const location = useLocation();
   const confirm = useConfirm();
   const { usuario } = useAuth();
-  // L4.3 (AUDITORIA_VIAJES2.0_RC1.md, H-4): mismo criterio que ya usa FilaViaje en Viajes.tsx
-  // desde L4.1 — acá faltaba extenderlo. El backend sigue siendo la única autoridad real
-  // (@Roles("OPERACIONES", "ADMINISTRADOR") en create/update/cambiarEstado/cancelar); esto solo
-  // oculta controles que de todos modos recibirían 403.
+  // L4.3 (AUDITORIA_VIAJES2.0_RC1.md, H-4): mismo criterio que ya usa
+  // frontend/src/components/FilaViaje.tsx desde L4.1 — acá faltaba extenderlo. El backend sigue
+  // siendo la única autoridad real (@Roles("OPERACIONES", "ADMINISTRADOR") en
+  // create/update/cambiarEstado/cancelar); esto solo oculta controles que de todos modos
+  // recibirían 403.
   const puedeGestionarViajes = usuario?.rol === "OPERACIONES" || usuario?.rol === "ADMINISTRADOR";
   const [viaje, setViaje] = useState<any>(null);
   const [error, setError] = useState("");
   // RC1.2 (AUDITORIA_VIAJES2.0_RC1.md, H-3): dos instancias independientes, mismo patrón ya
-  // usado en FilaViaje (Viajes.tsx, L4.1/L4.2) — reemplazan el guard manual por useState que
-  // tenía esta pantalla (ventana de doble-clic más ancha que el guard por ref de useAsyncAction).
+  // usado en frontend/src/components/FilaViaje.tsx (L4.1/L4.2) — reemplazan el guard manual por
+  // useState que tenía esta pantalla (ventana de doble-clic más ancha que el guard por ref de
+  // useAsyncAction).
   // Los botones siguen deshabilitándose juntos (ver "busy" combinado más abajo) para preservar
   // exactamente el comportamiento previo, donde un único `busy` cubría ambas acciones; y cada
   // acción sigue limpiando el error de la otra al iniciar (ver avanzarEstado/cancelarViaje),
