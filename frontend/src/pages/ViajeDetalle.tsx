@@ -5,8 +5,7 @@ import { useAsyncAction } from "../hooks/useAsyncAction";
 import { useAuth } from "../context/AuthContext";
 import { useConfirm } from "../components/ConfirmDialog";
 import { fmtFechaCalendario } from "../utils/fecha";
-
-const ORDEN_ESTADOS = ["PENDIENTE", "ASIGNADO", "EN_CARGA", "CARGADO", "EN_TRANSITO", "DESCARGADO"];
+import { ORDEN_ESTADOS } from "../utils/estadosViaje";
 
 function fmtMoney(n: number) {
   return new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 0 }).format(n || 0);

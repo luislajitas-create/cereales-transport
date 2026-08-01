@@ -289,3 +289,15 @@ Justificación: los 6 bloques publicados son consistentes entre sí y con el bac
 **Builds y tests:** backend sin cambios, 11/11 suites, 82/82 tests verde. Frontend build verde, 120 módulos.
 
 **Deuda remanente sin cambios:** H-6 a H-11 (deuda aceptable / mejora futura, sin bloqueantes).
+
+---
+
+## 16. H-6 — Fuente única de verdad para ORDEN_ESTADOS (adenda)
+
+**H-6 (`ORDEN_ESTADOS` duplicado): cerrado, con una corrección respecto al hallazgo original.** La auditoría previa a la implementación confirmó por lectura directa de `schema.prisma` que `EstadoViajeEnum` **sí incluye `CANCELADO`** (7 valores, no 6) — corrigiendo una suposición incorrecta escrita en un bloque anterior. También confirmó que el backend **no tenía duplicación real**: `ORDEN_ESTADOS` ya vivía en un único lugar (`viajes.controller.ts`), usado solo ahí. La duplicación real estaba exclusivamente entre `Viajes.tsx` y `ViajeDetalle.tsx` (frontend). Se creó `frontend/src/utils/estadosViaje.ts` (mismo patrón que `utils/fecha.ts` de RC1.1: un archivo nuevo, mismos dos consumidores) exportando `ORDEN_ESTADOS`, importado por ambos en vez de declararlo cada uno por separado. Backend sin cambios. El filtro de Estado del listado (7 valores, semántica distinta — "cualquier valor real de `estado`" vs. "orden secuencial de avance") se mantuvo separado, con evidencia confirmando que su semántica es genuinamente distinta.
+
+**Validación funcional:** un Viaje de prueba real avanzado paso a paso, `PENDIENTE → ASIGNADO → EN_CARGA → CARGADO → EN_TRANSITO → DESCARGADO`, desde `ViajeDetalle.tsx` — cada paso mostró el "Avanzar a X" correcto, terminando sin botón en `DESCARGADO` (terminal). Un segundo Viaje avanzado un paso desde el listado (`Viajes.tsx`) confirmó el mismo comportamiento ahí. El filtro de Estado confirmado con las mismas 7 opciones, mismo orden.
+
+**Builds y tests:** backend sin cambios, 11/11 suites, 82/82 tests verde. Frontend build verde, 121 módulos (+1 por el archivo nuevo).
+
+**Deuda remanente sin cambios:** H-7 a H-11 (deuda aceptable / mejora futura, sin bloqueantes).
