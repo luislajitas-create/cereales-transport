@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useLocation, useParams } from "react-router-dom";
 import { api } from "../api/client";
+import { useAsyncAction } from "../hooks/useAsyncAction";
 import { useConfirm } from "../components/ConfirmDialog";
 import { fmtFechaCalendario } from "../utils/fecha";
 
@@ -16,12 +17,27 @@ export default function ViajeDetalle() {
   const confirm = useConfirm();
   const [viaje, setViaje] = useState<any>(null);
   const [error, setError] = useState("");
+  // RC1.2 (AUDITORIA_VIAJES2.0_RC1.md, H-3): dos instancias independientes, mismo patrón ya
+  // usado en FilaViaje (Viajes.tsx, L4.1/L4.2) — reemplazan el guard manual por useState que
+  // tenía esta pantalla (ventana de doble-clic más ancha que el guard por ref de useAsyncAction).
+  // Los botones siguen deshabilitándose juntos (ver "busy" combinado más abajo) para preservar
+  // exactamente el comportamiento previo, donde un único `busy` cubría ambas acciones; y cada
+  // acción sigue limpiando el error de la otra al iniciar (ver avanzarEstado/cancelarViaje),
+  // replicando el `setError("")` compartido que ambas tenían antes de esta migración.
+  const accionAvanzar = useAsyncAction();
+  const accionCancelar = useAsyncAction();
   // UX Refinement (First Trip): "creado" viaja como state de navegación (no persistido, no
   // querystring) desde ViajeForm.tsx tras el POST — se lee una sola vez al montar. Un refresh
   // de esta pantalla pierde el state (comportamiento esperado de history.state) y el mensaje
   // no reaparece, que es lo que se quiere: es un aviso de "recién creado", no un estado del Viaje.
-  const [success, setSuccess] = useState(location.state?.creado ? "✅ Viaje creado correctamente." : "");
-  const [busy, setBusy] = useState(false);
+  // Se siembra en accionCancelar.success (no hay un "success" propio de esta pantalla desde
+  // RC1.2) porque es el único mensaje de éxito que existe acá, y así hereda gratis el mismo
+  // comportamiento de antes: se limpia apenas se intenta cancelar (accionCancelar.run() limpia su
+  // success al iniciar) y sobrevive intacto a un avanzarEstado exitoso o fallido.
+  useEffect(() => {
+    if (location.state?.creado) accionCancelar.setSuccess("✅ Viaje creado correctamente.");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   // Listado Operativo, Bloque L3 (AUDITORIA_DISENO_VIAJES2.0_L3_PERSISTENCIA_LISTADO.md, v1):
   // Viajes.tsx pasa la URL exacta desde la que se navegó (con filtros/búsqueda) como state al
   // entrar acá. Si no existe (acceso directo, o el state se perdió en un refresh), cae a /viajes
@@ -34,21 +50,20 @@ export default function ViajeDetalle() {
 
   useEffect(() => { cargar(); }, [id]);
 
-  async function avanzarEstado() {
+  function avanzarEstado() {
     if (!viaje) return;
     const idx = ORDEN_ESTADOS.indexOf(viaje.estado);
     const siguiente = ORDEN_ESTADOS[idx + 1];
     if (!siguiente) return;
-    setBusy(true);
     setError("");
-    try {
-      await api.post(`/viajes/${id}/estado`, { estado: siguiente });
-      cargar();
-    } catch (err: any) {
-      setError(err?.response?.data?.message || "No se pudo cambiar el estado");
-    } finally {
-      setBusy(false);
-    }
+    accionCancelar.setError("");
+    accionAvanzar.run(
+      async () => {
+        await api.post(`/viajes/${id}/estado`, { estado: siguiente });
+        cargar();
+      },
+      { errorMessage: "No se pudo cambiar el estado" },
+    );
   }
 
   async function cancelarViaje() {
@@ -60,18 +75,19 @@ export default function ViajeDetalle() {
       confirmLabel: "Cancelar viaje",
     });
     if (!ok.confirmed) return;
-    setBusy(true);
     setError("");
-    setSuccess("");
-    try {
-      await api.post(`/viajes/${id}/cancelar`, { motivo: ok.motivo });
-      setSuccess(`Viaje N° ${viaje.numeroViaje} cancelado.`);
-      cargar();
-    } catch (err: any) {
-      setError(err?.response?.data?.message || "No se pudo cancelar el viaje");
-    } finally {
-      setBusy(false);
-    }
+    accionAvanzar.setError("");
+    accionCancelar.run(
+      async () => {
+        await api.post(`/viajes/${id}/cancelar`, { motivo: ok.motivo });
+        cargar();
+        return viaje.numeroViaje;
+      },
+      {
+        successMessage: (numero: number) => `Viaje N° ${numero} cancelado.`,
+        errorMessage: "No se pudo cancelar el viaje",
+      },
+    );
   }
 
   if (error && !viaje) return <div className="error-banner">{error}</div>;
@@ -79,6 +95,8 @@ export default function ViajeDetalle() {
 
   const idx = ORDEN_ESTADOS.indexOf(viaje.estado);
   const siguienteEstado = idx >= 0 && idx < ORDEN_ESTADOS.length - 1 ? ORDEN_ESTADOS[idx + 1] : null;
+  const busy = accionAvanzar.busy || accionCancelar.busy;
+  const accionError = error || accionAvanzar.error || accionCancelar.error;
 
   return (
     <div>
@@ -89,8 +107,8 @@ export default function ViajeDetalle() {
         <h1>Viaje N° {viaje.numeroViaje}</h1>
         <span className={`badge ${viaje.estado}`}>{viaje.estado}</span>
       </div>
-      {error && <div className="error-banner">{error}</div>}
-      {success && <div className="success-banner">{success}</div>}
+      {accionError && <div className="error-banner">{accionError}</div>}
+      {accionCancelar.success && <div className="success-banner">{accionCancelar.success}</div>}
 
       <div className="card">
         <div className="form-grid">

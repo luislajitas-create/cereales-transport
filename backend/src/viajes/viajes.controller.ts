@@ -365,12 +365,27 @@ export class ViajesController {
     // Núcleo Viajes 2.0, Tarea 1: mismo criterio que create() (ver comentario de Hardening más
     // arriba) — antes eran dos escrituras sin transacción; un fallo entre ambas podía dejar el
     // Viaje en su nuevo estado sin la fila de HistorialEstadoViaje que lo explica.
+    //
+    // RC1.2 (AUDITORIA_VIAJES2.0_RC1.md, H-2): `viaje.estado` llega desde una lectura hecha
+    // *antes* de esta transacción (en cambiarEstado()/cancelar()), no protegida por ningún lock.
+    // Si dos requests concurrentes leen el mismo estado y ambas pasan la validación del método
+    // que llama a este, el `tx.viaje.update({ where: { id } })` original no condicionaba el
+    // `where` al estado esperado — ambas escrituras podían aplicarse, dejando dos filas de
+    // historial para una sola transición lógica. Se reemplaza por el mismo patrón `updateMany` +
+    // `count === 0` que ya usan facturas.controller.ts/liquidaciones.controller.ts: si el estado
+    // real ya no coincide con el que esta llamada esperaba (porque otra request ganó la carrera),
+    // `count` da 0, se aborta con un mensaje explícito y la transacción completa se revierte —
+    // no queda ninguna fila de historial huérfana.
     return this.prisma.$transaction(async (tx) => {
-      const actualizado = await tx.viaje.update({
-        where: { id: viaje.id },
+      const { count } = await tx.viaje.updateMany({
+        where: { id: viaje.id, estado: viaje.estado },
         data: { estado: nuevo as any },
-        include: includeViaje,
       });
+      if (count === 0) {
+        throw new BadRequestException(
+          "El viaje fue modificado por otra operación en curso. Actualice la página e intente nuevamente.",
+        );
+      }
       await tx.historialEstadoViaje.create({
         data: {
           viajeId: viaje.id,
@@ -379,7 +394,7 @@ export class ViajesController {
           usuarioId: user?.id || null,
         },
       });
-      return actualizado;
+      return tx.viaje.findUnique({ where: { id: viaje.id }, include: includeViaje });
     });
   }
 }
