@@ -301,3 +301,26 @@ Justificación: los 6 bloques publicados son consistentes entre sí y con el bac
 **Builds y tests:** backend sin cambios, 11/11 suites, 82/82 tests verde. Frontend build verde, 121 módulos (+1 por el archivo nuevo).
 
 **Deuda remanente sin cambios:** H-7 a H-11 (deuda aceptable / mejora futura, sin bloqueantes).
+
+---
+
+## 17. H-7 — Eliminar sobre-fetching en avanzar/cancelar (adenda)
+
+**H-7 (sobre-fetching en `aplicarCambioEstado()`): cerrado.** Auditoría previa confirmó: `aplicarCambioEstado()` tiene exactamente 3 callers, todos internos al mismo controller (`cambiarEstado()` x2, `cancelar()` x1) — ningún caller externo. Ningún test backend (11 archivos `*.spec.ts` revisados) toca este método ni sus endpoints. Búsqueda global en todo el repositorio confirmó exactamente 2 consumidores frontend (`Viajes.tsx`, `ViajeDetalle.tsx`), ninguno más — ni siquiera en `docs/`. `Viajes.tsx` solo lee `data.estado`; `ViajeDetalle.tsx` no lee la respuesta del POST en absoluto (siempre refresca vía `cargar()` → `GET /viajes/:id`).
+
+**Contrato antes:** Viaje completo (`include: includeViaje`, 9 relaciones + todos los campos escalares). **Contrato después:** `{ id: string, estado: string }` (`select: { id: true, estado: true }`). Cambio de contrato observable reconocido explícitamente — sin consumidores internos ni externos afectados (no existe documentación de API pública ni integraciones externas conocidas).
+
+**Alternativas evaluadas:** A) mantener `includeViaje` (no resuelve nada); B) `select: { id, estado }` (elegida — coherente con `selectViajeListado` de L1); C) `select: { estado }` solamente (más mínima, pero se prefirió incluir `id` por convención REST de identificar el recurso, costo trivial). Guard de concurrencia de RC1.2 (`updateMany` + `count === 0`) y la escritura del historial dentro de la misma transacción quedaron **sin ningún cambio** — solo se tocó el `select` de la lectura final.
+
+**Medición real, mismo dataset (viajes con idénticas relaciones catalogadas), antes/después:**
+
+| Endpoint | Antes | Después | Reducción |
+|---|---|---|---|
+| `POST /viajes/:id/estado` | 2634 bytes | 65 bytes | 97.53% |
+| `POST /viajes/:id/cancelar` | 2635 bytes | 66 bytes | 97.50% |
+
+**Validación funcional real:** listado — avanzar y cancelar una fila, badge y botón actualizados localmente, sin recarga total (mismas filas visibles), filtro de búsqueda (`?q=`) conservado en la URL. Detalle — avanzar (historial actualizado de 2 a 3 filas vía `cargar()`), cancelar con motivo (badge `CANCELADO`, banner de éxito, historial con el motivo registrado), triple-clic rápido sobre "Avanzar" confirmado con exactamente 1 `POST` en el log de red (guard intacto). Casos adicionales: transición inválida → `400` con el mismo mensaje de siempre; guard de concurrencia (RC1.2) probado con burst de 4 requests → 1 éxito con la nueva forma mínima, 3 rechazos correctos; rol `LECTURA` → `403` sin cambios. Error de red no se forzó explícitamente (requeriría cortar el backend) — no hay riesgo arquitectónico: `useAsyncAction` captura cualquier error de axios de forma uniforme, sin depender de la forma de la respuesta exitosa.
+
+**Builds y tests:** backend build OK, 11/11 suites, 82/82 tests verde. Frontend build OK, sin cambios (este bloque es backend-only).
+
+**Deuda remanente sin cambios:** H-8 a H-11 (deuda aceptable / mejora futura, sin bloqueantes).

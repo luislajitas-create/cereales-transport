@@ -394,7 +394,12 @@ export class ViajesController {
           usuarioId: user?.id || null,
         },
       });
-      return tx.viaje.findUnique({ where: { id: viaje.id }, include: includeViaje });
+      // H-7 (AUDITORIA_VIAJES2.0_RC1.md, §17): antes devolvía el Viaje completo (includeViaje,
+      // 9 relaciones). Único caller real de este resultado es la respuesta HTTP de
+      // cambiarEstado()/cancelar() — auditado: ningún consumidor (Viajes.tsx, ViajeDetalle.tsx,
+      // ni ningún test backend) lee más que "estado" de esta respuesta; ViajeDetalle.tsx ni
+      // siquiera la lee, siempre vuelve a pedir el Viaje completo vía GET /viajes/:id después.
+      return tx.viaje.findUnique({ where: { id: viaje.id }, select: { id: true, estado: true } });
     });
   }
 }
