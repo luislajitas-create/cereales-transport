@@ -42,8 +42,13 @@ export default function App() {
         <Route element={<Layout />}>
           <Route path="/" element={<Dashboard />} />
           <Route path="/viajes" element={<Viajes />} />
-          <Route path="/viajes/nuevo" element={<ViajeForm />} />
-          <Route path="/viajes/:id/editar" element={<ViajeForm />} />
+          {/* L4.3 (AUDITORIA_VIAJES2.0_RC1.md, H-4): solo las rutas puramente de escritura.
+              /viajes y /viajes/:id quedan afuera a propósito — son de lectura válida para
+              cualquier rol autenticado (backend sin @Roles() en findAll()/findOne()). */}
+          <Route element={<ProtectedRoute roles={["OPERACIONES", "ADMINISTRADOR"]} />}>
+            <Route path="/viajes/nuevo" element={<ViajeForm />} />
+            <Route path="/viajes/:id/editar" element={<ViajeForm />} />
+          </Route>
           <Route path="/viajes/:id" element={<ViajeDetalle />} />
           <Route path="/clientes" element={<Clientes />} />
           <Route path="/transportistas" element={<Transportistas />} />

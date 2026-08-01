@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, useLocation, useParams } from "react-router-dom";
 import { api } from "../api/client";
 import { useAsyncAction } from "../hooks/useAsyncAction";
+import { useAuth } from "../context/AuthContext";
 import { useConfirm } from "../components/ConfirmDialog";
 import { fmtFechaCalendario } from "../utils/fecha";
 
@@ -15,6 +16,12 @@ export default function ViajeDetalle() {
   const { id } = useParams();
   const location = useLocation();
   const confirm = useConfirm();
+  const { usuario } = useAuth();
+  // L4.3 (AUDITORIA_VIAJES2.0_RC1.md, H-4): mismo criterio que ya usa FilaViaje en Viajes.tsx
+  // desde L4.1 — acá faltaba extenderlo. El backend sigue siendo la única autoridad real
+  // (@Roles("OPERACIONES", "ADMINISTRADOR") en create/update/cambiarEstado/cancelar); esto solo
+  // oculta controles que de todos modos recibirían 403.
+  const puedeGestionarViajes = usuario?.rol === "OPERACIONES" || usuario?.rol === "ADMINISTRADOR";
   const [viaje, setViaje] = useState<any>(null);
   const [error, setError] = useState("");
   // RC1.2 (AUDITORIA_VIAJES2.0_RC1.md, H-3): dos instancias independientes, mismo patrón ya
@@ -137,7 +144,9 @@ export default function ViajeDetalle() {
               demás campos quedan bloqueados ahí mismo, con el mensaje explicando el motivo. */}
           {/* Bloque L3 (ajuste): retransmite el mismo volverA que este Detalle recibió, para que
               ViajeForm.tsx pueda devolverlo intacto al guardar y volver acá. */}
-          <Link className="btn secondary" to={`/viajes/${id}/editar`} state={{ volverA }}>Editar viaje</Link>
+          {puedeGestionarViajes && (
+            <Link className="btn secondary" to={`/viajes/${id}/editar`} state={{ volverA }}>Editar viaje</Link>
+          )}
           {/* Sub-bloque L4.2 (AUDITORIA_DISENO_VIAJES2.0_L4.2_CANCELAR_LISTADO.md, Decisión A):
               el backend nunca bloqueó cancelar un DESCARGADO por ese solo motivo — solo bloquea
               si ya está facturado o liquidado (assertCancelacionPermitida), con su propio mensaje
@@ -146,7 +155,7 @@ export default function ViajeDetalle() {
               X" no se ve afectado: siguienteEstado ya es null para DESCARGADO (es el último
               estado de ORDEN_ESTADOS), así que ese botón sigue sin aparecer ahí, sin necesidad de
               una condición aparte. */}
-          {viaje.estado !== "CANCELADO" && (
+          {viaje.estado !== "CANCELADO" && puedeGestionarViajes && (
             <>
               {siguienteEstado && (
                 <button className="btn success" disabled={busy} onClick={avanzarEstado}>

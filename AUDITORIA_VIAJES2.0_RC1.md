@@ -277,3 +277,15 @@ Justificación: los 6 bloques publicados son consistentes entre sí y con el bac
 **Builds y tests:** backend sin cambios, 11/11 suites, 82/82 tests verde. Frontend build verde, 120 módulos.
 
 **Deuda remanente sin cambios:** H-4 (gating de permisos parcial — L4.3), H-6 a H-11 (deuda aceptable / mejora futura).
+
+---
+
+## 15. L4.3 — Gating de permisos completo (adenda)
+
+**H-4 (gating de permisos parcial): cerrado.** Se extendió `puedeGestionarViajes` (mismo criterio ya usado en `FilaViaje` desde L4.1: `usuario?.rol === "OPERACIONES" || usuario?.rol === "ADMINISTRADOR"`) a los cuatro puntos que faltaban: "Editar viaje"/"Avanzar a X"/"Cancelar viaje" en `ViajeDetalle.tsx`, y "+ Nuevo viaje" en `Viajes.tsx`. Además, se protegieron las rutas puramente de escritura `/viajes/nuevo` y `/viajes/:id/editar` con el `ProtectedRoute` ya existente en el proyecto (usado en 6 pantallas administrativas) — `/viajes` y `/viajes/:id` quedan deliberadamente sin proteger por ser rutas de lectura válida para cualquier rol. El backend no se modificó: sigue siendo la única autoridad real (`@Roles("OPERACIONES", "ADMINISTRADOR")` sin cambios en los 4 endpoints de escritura).
+
+**Validación con sesiones reales:** `ADMINISTRADOR` ve y puede usar todos los controles, y accede sin bloqueo a ambas rutas de escritura. `LECTURA` (usuario de prueba real, login con contraseña real) no ve ningún control de escritura en listado ni Detalle, y al navegar directo por URL a `/viajes/nuevo` o `/viajes/:id/editar` recibe "Acceso restringido" — pero sigue accediendo sin problema a `/viajes` y `/viajes/:id`. Confirmado además a nivel de API: `POST /viajes` con token `LECTURA` → `403 Forbidden`; `GET /viajes` con el mismo token → `200`.
+
+**Builds y tests:** backend sin cambios, 11/11 suites, 82/82 tests verde. Frontend build verde, 120 módulos.
+
+**Deuda remanente sin cambios:** H-6 a H-11 (deuda aceptable / mejora futura, sin bloqueantes).

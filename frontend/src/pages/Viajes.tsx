@@ -149,6 +149,10 @@ function FilaViaje({ viaje, onEstadoActualizado }: { viaje: any; onEstadoActuali
 }
 
 export default function Viajes() {
+  // L4.3 (AUDITORIA_VIAJES2.0_RC1.md, H-4): mismo criterio que ya usa FilaViaje más abajo —
+  // duplicado deliberado (es una constante de una línea, no amerita una abstracción nueva).
+  const { usuario } = useAuth();
+  const puedeGestionarViajes = usuario?.rol === "OPERACIONES" || usuario?.rol === "ADMINISTRADOR";
   // Listado Operativo, Bloque L3 (AUDITORIA_DISENO_VIAJES2.0_L3_PERSISTENCIA_LISTADO.md, v1):
   // los filtros y la búsqueda se inicializan desde la URL (mismo patrón que Catalogos.tsx con
   // ?tab=) para que un refresh o un link directo reproduzcan el mismo listado filtrado.
@@ -200,7 +204,7 @@ export default function Viajes() {
     <div>
       <div className="page-header">
         <h1>Viajes</h1>
-        <Link className="btn" to="/viajes/nuevo">+ Nuevo viaje</Link>
+        {puedeGestionarViajes && <Link className="btn" to="/viajes/nuevo">+ Nuevo viaje</Link>}
       </div>
 
       {error && <div className="error-banner">{error}</div>}
