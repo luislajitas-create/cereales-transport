@@ -254,3 +254,26 @@ Justificación: los 6 bloques publicados son consistentes entre sí y con el bac
 **Builds y tests:** backend 11/11 suites, 82/82 tests verde (sin cambios en la cantidad respecto a RC1/RC1.1); frontend build verde, 120 módulos.
 
 **Deuda remanente sin cambios:** H-4 (gating de permisos parcial), H-5 a H-11 (deuda aceptable / mejora futura).
+
+---
+
+## 14. RC1.3 — Alinear ViajeForm con las reglas de facturación y liquidación (adenda)
+
+**H-5 (`ViajeForm.tsx` no anticipa bloqueos del backend): cerrado.**
+
+**Auditoría previa (sin encontrar inconsistencias en el backend):** `update()` en `viajes.controller.ts` usa tres listas — `CAMPOS_SIEMPRE_EDITABLES` (`observaciones`, `productorId`, nunca bloqueados), `CAMPOS_BLOQUEADOS_FACTURACION` y `CAMPOS_BLOQUEADOS_LIQUIDACION` — asimétricas a propósito: un Viaje facturado-pero-no-liquidado permite seguir cambiando `choferId`/`camionId`/`acopladoId` (la factura es un documento comercial, no le importa quién manejó); uno liquidado-pero-no-facturado permite seguir cambiando `cartaPorte`/`ctg`/`clienteId`. `CANCELADO` bloquea todo excepto `observaciones`/`productorId`, evaluado antes e independientemente de facturación/liquidación. El bloqueo aplica solo sobre campos efectivamente modificados (mismo valor no dispara error). Reglas confirmadas correctas y consistentes — **no se tocó el backend**.
+
+**Solución aplicada:** se replican en `ViajeForm.tsx` las mismas tres listas (mismo criterio ya aceptado en el proyecto para `ORDEN_ESTADOS`, H-6) y se calcula un `Set` de campos bloqueados a partir de `estado`/`estadoFacturacion`/`estadoLiquidacion` del Viaje (ya venían en la respuesta de `GET /viajes/:id`, antes descartados). Cada campo bloqueado se deshabilita (`disabled`, no se oculta — el usuario sigue viendo el valor) y se agrega una explicación en lenguaje de dominio (mismo vocabulario que ya usa `ViajeDetalle.tsx`: "facturado"/"liquidado"/"cancelado"), reutilizando `.warning-banner` (clase ya existente, usada en `PagoConsolidadoDetalle.tsx` — sin sistema de alertas nuevo). En modo creación (`/viajes/nuevo`) no aplica ninguna restricción.
+
+**Validación funcional real, con datos locales creados para cada combinación:**
+- **Caso 1 (totalmente editable):** Viaje nuevo, `PENDIENTE`, sin facturar/liquidar — los 13 campos habilitados, sin banner.
+- **Caso 2 (parcialmente bloqueado, facturado no liquidado):** confirmado el detalle asimétrico exacto — `fecha/cartaPorte/ctg/cerealId/clienteId/transportistaId/origenId/destinoId/toneladas/tarifaTonelada` deshabilitados, **`choferId`/`camionId`/`acopladoId` siguen habilitados**, banner "ya fue facturado... anulá la factura asociada".
+- **Caso 3 (totalmente bloqueado):** validado en dos variantes — `CANCELADO` (todo bloqueado salvo Productor/Observaciones, banner específico) y facturado+liquidado (mismo resultado, banner combinado citando ambos).
+- **Caso 4 (guardar un viaje permitido):** editar Observaciones de un Viaje sin restricciones y guardar — confirmado por lectura directa de la API que el cambio se persistió.
+- **Caso 5 (forzar un campo bloqueado):** UI confirma `disabled=true` en todos los casos anteriores; forzado directo vía API (`PATCH` cambiando `fecha` en un Viaje facturado) confirma que el backend sigue rechazando con `400` y el mismo mensaje explicativo — la UI es una mejora de UX, el backend sigue siendo la única barrera real.
+
+**Regresión:** `Viajes.tsx`/`ViajeDetalle.tsx`/backend sin cambios en este bloque; listado verificado mostrando fechas/estados/acciones correctos; modo creación (`/viajes/nuevo`) sin ninguna restricción nueva.
+
+**Builds y tests:** backend sin cambios, 11/11 suites, 82/82 tests verde. Frontend build verde, 120 módulos.
+
+**Deuda remanente sin cambios:** H-4 (gating de permisos parcial — L4.3), H-6 a H-11 (deuda aceptable / mejora futura).

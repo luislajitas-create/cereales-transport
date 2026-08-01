@@ -1,8 +1,56 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { api } from "../api/client";
 import { useUnsavedChangesGuard } from "../hooks/useUnsavedChangesGuard";
 import { useAsyncAction } from "../hooks/useAsyncAction";
+
+// RC1.3 (AUDITORIA_VIAJES2.0_RC1.md, H-5): replica exacta de las reglas de bloqueo de
+// update() en viajes.controller.ts (mismos nombres, mismo criterio) — el backend sigue siendo
+// la única fuente de verdad; esto es solo para reflejarlas en la UI antes del submit. Duplicado
+// deliberado, mismo criterio ya aceptado en el proyecto para ORDEN_ESTADOS (H-6).
+const TODOS_LOS_CAMPOS_EDITABLES = [
+  "fecha", "cartaPorte", "ctg", "cerealId", "clienteId", "transportistaId",
+  "choferId", "camionId", "acopladoId", "origenId", "destinoId", "toneladas", "tarifaTonelada",
+];
+const CAMPOS_BLOQUEADOS_FACTURACION = [
+  "fecha", "cartaPorte", "ctg", "clienteId", "cerealId", "origenId", "destinoId",
+  "transportistaId", "toneladas", "tarifaTonelada",
+];
+const CAMPOS_BLOQUEADOS_LIQUIDACION = [
+  "fecha", "toneladas", "tarifaTonelada", "transportistaId", "choferId", "camionId",
+  "acopladoId", "cerealId", "origenId", "destinoId",
+];
+
+function calcularCamposBloqueados(estados: { estado: string; estadoFacturacion: string; estadoLiquidacion: string } | null): Set<string> {
+  if (!estados) return new Set();
+  if (estados.estado === "CANCELADO") return new Set(TODOS_LOS_CAMPOS_EDITABLES);
+  const bloqueados = new Set<string>();
+  if (estados.estadoFacturacion !== "PENDIENTE_DE_FACTURAR") {
+    CAMPOS_BLOQUEADOS_FACTURACION.forEach((c) => bloqueados.add(c));
+  }
+  if (estados.estadoLiquidacion !== "PENDIENTE") {
+    CAMPOS_BLOQUEADOS_LIQUIDACION.forEach((c) => bloqueados.add(c));
+  }
+  return bloqueados;
+}
+
+// Mismo lenguaje que ya usan los mensajes de error del backend ("factura asociada", "liquidación
+// asociada") — no es jerga técnica, es el vocabulario de dominio que el usuario ya conoce por
+// ViajeDetalle.tsx (Estado facturación / Estado liquidación).
+function mensajeCamposBloqueados(estados: { estado: string; estadoFacturacion: string; estadoLiquidacion: string }): string {
+  if (estados.estado === "CANCELADO") {
+    return "Este viaje está cancelado. Solo se pueden modificar las Observaciones y el Productor.";
+  }
+  const facturado = estados.estadoFacturacion !== "PENDIENTE_DE_FACTURAR";
+  const liquidado = estados.estadoLiquidacion !== "PENDIENTE";
+  if (facturado && liquidado) {
+    return "Este viaje ya fue facturado y liquidado. Algunos campos no se pueden modificar: para cambiarlos, primero anulá la factura y la liquidación asociadas.";
+  }
+  if (facturado) {
+    return "Este viaje ya fue facturado. Algunos campos no se pueden modificar: para cambiarlos, primero anulá la factura asociada.";
+  }
+  return "Este viaje ya fue liquidado. Algunos campos no se pueden modificar: para cambiarlos, primero anulá la liquidación asociada.";
+}
 
 export default function ViajeForm() {
   const navigate = useNavigate();
@@ -31,6 +79,10 @@ export default function ViajeForm() {
   // ambos y crear dos Viajes idénticos. Mismo patrón que ya usan Usuarios.tsx y el resto del
   // proyecto para acciones que mutan datos.
   const accion = useAsyncAction();
+  // RC1.3: solo se completa en modo edición (ver el efecto que carga el Viaje más abajo) — en
+  // modo creación queda null, y calcularCamposBloqueados(null) da un Set vacío (nada bloqueado).
+  const [estadosViaje, setEstadosViaje] = useState<{ estado: string; estadoFacturacion: string; estadoLiquidacion: string } | null>(null);
+  const camposBloqueados = useMemo(() => calcularCamposBloqueados(estadosViaje), [estadosViaje]);
 
   const [form, setForm] = useState({
     fecha: new Date().toISOString().slice(0, 10),
@@ -81,6 +133,7 @@ export default function ViajeForm() {
     api
       .get(`/viajes/${id}`)
       .then(({ data }) => {
+        setEstadosViaje({ estado: data.estado, estadoFacturacion: data.estadoFacturacion, estadoLiquidacion: data.estadoLiquidacion });
         setForm({
           fecha: data.fecha.slice(0, 10),
           cartaPorte: data.cartaPorte,
@@ -139,30 +192,33 @@ export default function ViajeForm() {
         <h1>{editando ? "Editar viaje" : "Nuevo viaje"}</h1>
       </div>
       {accion.error && <div className="error-banner">{accion.error}</div>}
+      {editando && estadosViaje && camposBloqueados.size > 0 && (
+        <div className="warning-banner">{mensajeCamposBloqueados(estadosViaje)}</div>
+      )}
       <form className="card" onSubmit={handleSubmit}>
         <div className="form-grid">
           <div className="field">
             <label>Fecha</label>
-            <input type="date" value={form.fecha} onChange={(e) => update("fecha", e.target.value)} required />
+            <input type="date" value={form.fecha} onChange={(e) => update("fecha", e.target.value)} required disabled={camposBloqueados.has("fecha")} />
           </div>
           <div className="field">
             <label>Carta de porte</label>
-            <input value={form.cartaPorte} onChange={(e) => update("cartaPorte", e.target.value)} required />
+            <input value={form.cartaPorte} onChange={(e) => update("cartaPorte", e.target.value)} required disabled={camposBloqueados.has("cartaPorte")} />
           </div>
           <div className="field">
             <label>CTG</label>
-            <input value={form.ctg} onChange={(e) => update("ctg", e.target.value)} required />
+            <input value={form.ctg} onChange={(e) => update("ctg", e.target.value)} required disabled={camposBloqueados.has("ctg")} />
           </div>
           <div className="field">
             <label>Cereal</label>
-            <select value={form.cerealId} onChange={(e) => update("cerealId", e.target.value)} required>
+            <select value={form.cerealId} onChange={(e) => update("cerealId", e.target.value)} required disabled={camposBloqueados.has("cerealId")}>
               <option value="">Seleccionar...</option>
               {cereales.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
             </select>
           </div>
           <div className="field">
             <label>Cliente</label>
-            <select value={form.clienteId} onChange={(e) => update("clienteId", e.target.value)} required>
+            <select value={form.clienteId} onChange={(e) => update("clienteId", e.target.value)} required disabled={camposBloqueados.has("clienteId")}>
               <option value="">Seleccionar...</option>
               {clientes.map((c) => <option key={c.id} value={c.id}>{c.razonSocial}</option>)}
             </select>
@@ -176,14 +232,14 @@ export default function ViajeForm() {
           </div>
           <div className="field">
             <label>Transportista</label>
-            <select value={form.transportistaId} onChange={(e) => update("transportistaId", e.target.value)} required>
+            <select value={form.transportistaId} onChange={(e) => update("transportistaId", e.target.value)} required disabled={camposBloqueados.has("transportistaId")}>
               <option value="">Seleccionar...</option>
               {transportistas.map((t) => <option key={t.id} value={t.id}>{t.razonSocial}</option>)}
             </select>
           </div>
           <div className="field">
             <label>Chofer</label>
-            <select value={form.choferId} onChange={(e) => update("choferId", e.target.value)} required disabled={!form.transportistaId}>
+            <select value={form.choferId} onChange={(e) => update("choferId", e.target.value)} required disabled={!form.transportistaId || camposBloqueados.has("choferId")}>
               <option value="">Seleccionar...</option>
               {choferes.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
             </select>
@@ -191,7 +247,7 @@ export default function ViajeForm() {
           </div>
           <div className="field">
             <label>Camión</label>
-            <select value={form.camionId} onChange={(e) => update("camionId", e.target.value)} required disabled={!form.transportistaId}>
+            <select value={form.camionId} onChange={(e) => update("camionId", e.target.value)} required disabled={!form.transportistaId || camposBloqueados.has("camionId")}>
               <option value="">Seleccionar...</option>
               {vehiculos.filter((v) => v.tipo === "CAMION").map((v) => <option key={v.id} value={v.id}>{v.patente}</option>)}
             </select>
@@ -199,7 +255,7 @@ export default function ViajeForm() {
           </div>
           <div className="field">
             <label>Acoplado (opcional)</label>
-            <select value={form.acopladoId} onChange={(e) => update("acopladoId", e.target.value)} disabled={!form.transportistaId}>
+            <select value={form.acopladoId} onChange={(e) => update("acopladoId", e.target.value)} disabled={!form.transportistaId || camposBloqueados.has("acopladoId")}>
               <option value="">Sin acoplado</option>
               {vehiculos.filter((v) => v.tipo === "ACOPLADO").map((v) => <option key={v.id} value={v.id}>{v.patente}</option>)}
             </select>
@@ -210,25 +266,25 @@ export default function ViajeForm() {
             {/* UX Refinement (First Trip): solo ayuda visual — excluye la Ubicación ya elegida
                 como Destino de las opciones de Origen. No es una validación nueva (el backend
                 sigue sin impedir origenId === destinoId, a propósito, sin tocarlo). */}
-            <select value={form.origenId} onChange={(e) => update("origenId", e.target.value)} required>
+            <select value={form.origenId} onChange={(e) => update("origenId", e.target.value)} required disabled={camposBloqueados.has("origenId")}>
               <option value="">Seleccionar...</option>
               {ubicaciones.filter((u) => u.id !== form.destinoId).map((u) => <option key={u.id} value={u.id}>{u.nombre} ({u.tipo})</option>)}
             </select>
           </div>
           <div className="field">
             <label>Destino</label>
-            <select value={form.destinoId} onChange={(e) => update("destinoId", e.target.value)} required>
+            <select value={form.destinoId} onChange={(e) => update("destinoId", e.target.value)} required disabled={camposBloqueados.has("destinoId")}>
               <option value="">Seleccionar...</option>
               {ubicaciones.filter((u) => u.id !== form.origenId).map((u) => <option key={u.id} value={u.id}>{u.nombre} ({u.tipo})</option>)}
             </select>
           </div>
           <div className="field">
             <label>Toneladas</label>
-            <input type="number" step="0.01" min="0" value={form.toneladas} onChange={(e) => update("toneladas", e.target.value)} required />
+            <input type="number" step="0.01" min="0" value={form.toneladas} onChange={(e) => update("toneladas", e.target.value)} required disabled={camposBloqueados.has("toneladas")} />
           </div>
           <div className="field">
             <label>Tarifa por tonelada</label>
-            <input type="number" step="0.01" min="0" value={form.tarifaTonelada} onChange={(e) => update("tarifaTonelada", e.target.value)} required />
+            <input type="number" step="0.01" min="0" value={form.tarifaTonelada} onChange={(e) => update("tarifaTonelada", e.target.value)} required disabled={camposBloqueados.has("tarifaTonelada")} />
           </div>
           <div className="field">
             <label>Importe estimado</label>
