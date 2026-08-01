@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, useLocation, useParams } from "react-router-dom";
 import { api } from "../api/client";
 import { useConfirm } from "../components/ConfirmDialog";
+import { fmtFechaCalendario } from "../utils/fecha";
 
 const ORDEN_ESTADOS = ["PENDIENTE", "ASIGNADO", "EN_CARGA", "CARGADO", "EN_TRANSITO", "DESCARGADO"];
 
@@ -93,7 +94,7 @@ export default function ViajeDetalle() {
 
       <div className="card">
         <div className="form-grid">
-          <div><strong>Fecha:</strong> {new Date(viaje.fecha).toLocaleDateString()}</div>
+          <div><strong>Fecha:</strong> {fmtFechaCalendario(viaje.fecha)}</div>
           <div><strong>CTG:</strong> {viaje.ctg}</div>
           <div><strong>Carta de porte:</strong> {viaje.cartaPorte}</div>
           <div><strong>Cereal:</strong> {viaje.cereal?.nombre}</div>

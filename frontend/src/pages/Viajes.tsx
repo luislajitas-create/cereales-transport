@@ -4,6 +4,7 @@ import { api } from "../api/client";
 import { useAsyncAction } from "../hooks/useAsyncAction";
 import { useAuth } from "../context/AuthContext";
 import { useConfirm } from "../components/ConfirmDialog";
+import { fmtFechaCalendario } from "../utils/fecha";
 
 const ORDEN_ESTADOS = ["PENDIENTE", "ASIGNADO", "EN_CARGA", "CARGADO", "EN_TRANSITO", "DESCARGADO"];
 
@@ -90,7 +91,7 @@ function FilaViaje({ viaje, onEstadoActualizado }: { viaje: any; onEstadoActuali
           {viaje.numeroViaje}
         </Link>
       </td>
-      <td>{new Date(viaje.fecha).toLocaleDateString()}</td>
+      <td>{fmtFechaCalendario(viaje.fecha)}</td>
       <td>{viaje.ctg}</td>
       <td>{viaje.cereal?.nombre}</td>
       <td>{viaje.cliente?.razonSocial}</td>
