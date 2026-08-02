@@ -137,6 +137,18 @@ tbody tr:hover { background: #f0f4f7; }
 .confirm-dialog .field { margin-bottom: 0.8rem; }
 .confirm-dialog textarea, .confirm-dialog input { width: 100%; padding: 0.5rem; border: 1px solid var(--border); border-radius: 4px; font-size: 0.85rem; }
 .confirm-dialog .actions-row { margin-top: 0.4rem; justify-content: flex-end; }
+/* H-10 (AUDITORIA_VIAJES2.0_RC1.md, H-10) — menú contextual de tres puntos, hoy único
+   consumidor FilaViaje.tsx. Nombres genéricos de patrón (no ".viaje-...") para que un futuro
+   menú similar en otra pantalla pueda reutilizarlos, igual que .confirm-dialog/.error-banner. */
+.dropdown { position: relative; margin-left: 0.4rem; }
+.dropdown-trigger { padding: 0.5rem 0.7rem; }
+.dropdown-menu {
+  position: absolute; right: 0; top: 100%; margin-top: 0.2rem; z-index: 10;
+  background: white; border: 1px solid var(--border); border-radius: 4px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15); min-width: 150px; overflow: hidden;
+}
+.dropdown-menu-item { width: 100%; border-radius: 0; }
+
 .muted { color: #888; font-size: 0.82rem; }
 .section-title { font-size: 1.05rem; color: var(--primary); margin: 1.2rem 0 0.6rem; }
 .checkbox-row { display: flex; align-items: center; gap: 0.5rem; }

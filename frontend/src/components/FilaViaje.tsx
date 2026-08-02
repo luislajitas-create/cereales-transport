@@ -113,26 +113,18 @@ function FilaViaje({ viaje, onEstadoActualizado }: { viaje: any; onEstadoActuali
           </button>
         )}
         {viaje.estado !== "CANCELADO" && puedeGestionarViajes && (
-          <span ref={menuRef} style={{ position: "relative", marginLeft: "0.4rem" }}>
+          <span ref={menuRef} className="dropdown">
             <button
-              className="btn secondary"
-              style={{ padding: "0.5rem 0.7rem" }}
+              className="btn secondary dropdown-trigger"
               onClick={() => setMenuAbierto((v) => !v)}
               aria-label="Más acciones"
             >
               ⋮
             </button>
             {menuAbierto && (
-              <div
-                style={{
-                  position: "absolute", right: 0, top: "100%", marginTop: "0.2rem", zIndex: 10,
-                  background: "white", border: "1px solid var(--border)", borderRadius: "4px",
-                  boxShadow: "0 4px 12px rgba(0,0,0,0.15)", minWidth: "150px", overflow: "hidden",
-                }}
-              >
+              <div className="dropdown-menu">
                 <button
-                  className="btn danger"
-                  style={{ width: "100%", borderRadius: 0 }}
+                  className="btn danger dropdown-menu-item"
                   disabled={accionCancelar.busy}
                   onClick={cancelar}
                 >

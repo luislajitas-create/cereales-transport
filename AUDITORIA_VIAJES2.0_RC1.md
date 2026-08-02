@@ -362,3 +362,27 @@ Justificación: los 6 bloques publicados son consistentes entre sí y con el bac
 **Builds y tests:** backend sin cambios, 11/11 suites, 82/82 tests verde. Frontend build OK, sin errores TypeScript, 122 módulos (sin cambios en la cantidad, mismo árbol de módulos que H-8).
 
 **Deuda remanente sin cambios:** H-10 y H-11 (deuda aceptable / mejora futura, sin bloqueantes).
+
+---
+
+## 20. H-10 — Extraer estilos inline del menú contextual a CSS (adenda)
+
+**H-10 (estilos inline del menú de tres puntos): cerrado.** Auditoría previa releyó `FilaViaje.tsx` completo (post H-8/H-9) y listó los 6 `style={{...}}` presentes: solo 4 pertenecen realmente al menú contextual (`<span ref={menuRef}>`, el botón `⋮`, el `<div>` del dropdown y el botón "Cancelar viaje" de adentro); los otros 2 quedaron deliberadamente fuera de alcance — el banner de error de la fila (no depende del menú) y el `<td>` contenedor de la celda de acciones (separable: el ancla real del dropdown es el `<span ref={menuRef}>`, que ya tenía su propio `position: relative`, no el `<td>`).
+
+Búsqueda global (`⋮`, `boxShadow`, `position: "absolute"`) confirmó que `FilaViaje.tsx` es el **único consumidor** de este patrón en todo el frontend — no hay otro menú/dropdown para reutilizar ni para evitar romper.
+
+**Alternativas evaluadas:** A) una clase grande para todo el menú (descartada — mezcla contenedor/panel/ítem, baja reutilización); B) varias clases pequeñas y semánticas (elegida); C) clases específicas de Viajes (descartada — el patrón visual de un menú de 3 puntos no tiene nada intrínseco del módulo, y la convención real de `styles.css` ya usa nombres genéricos de patrón como `.confirm-dialog`/`.error-banner`, nunca prefijados por módulo, aunque esos componentes se consuman desde varias páginas).
+
+**Nombres elegidos:** en inglés genérico (`.dropdown`, `.dropdown-trigger`, `.dropdown-menu`, `.dropdown-menu-item`) en vez de los ejemplos en español del enunciado original — decisión con evidencia: la convención real del proyecto nombra patrones de UI en inglés (`.confirm-dialog`, `.confirm-overlay`, `.error-banner`, `.badge`, `.actions-row`), nunca en español ni con prefijo de módulo.
+
+**Implementación:** 4 clases nuevas agregadas a `frontend/src/styles.css` (mismos valores exactos que los estilos inline que reemplazan, sin ningún cambio de valor). `FilaViaje.tsx`: los 4 `style={{...}}` del menú reemplazados por `className`, combinando con las clases ya existentes (`btn secondary dropdown-trigger`, `btn danger dropdown-menu-item`) sin renombrar ni tocar `btn`/`secondary`/`danger`/`badge`/`error-banner`. El banner de error de la fila y el `<td>` de la celda de acciones quedaron sin tocar, tal como decidió la auditoría.
+
+**Validación visual:** confirmada manualmente por el usuario en navegador real — el menú se ve idéntico a antes (posición, alineación, fondo, borde, radio, sombra, ancho mínimo, z-index); "Cancelar viaje" sigue ocupando todo el ancho sin cortar texto ni mostrar esquinas redondeadas.
+
+**Validación funcional:** confirmada manualmente por el usuario — listado sin cambios, menú abre/cierra y cierra con clic afuera, Avanzar y Cancelar funcionan igual (badge/modal/motivo obligatorio), `ADMINISTRADOR` ve las acciones y `LECTURA` no ve Avanzar/menú/"+ Nuevo viaje". Cambio puramente visual/CSS, sin alterar ningún comportamiento observable.
+
+**Regresiones:** no se re-probaron L1–L4.3/H-6/H-9/RC1.1–1.3 de forma completa — ninguno de esos bloques depende de la implementación CSS del menú, solo de su comportamiento (ya confirmado sin cambios).
+
+**Builds y tests:** backend sin cambios, 11/11 suites, 82/82 tests verde. Frontend build OK, sin errores TypeScript, 122 módulos (sin cambios en la cantidad).
+
+**Deuda remanente sin cambios:** H-11 (deuda aceptable, fuera de alcance de este cierre).
