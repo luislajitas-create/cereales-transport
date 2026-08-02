@@ -1,7 +1,12 @@
 import { useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { api } from "../api/client";
 import { useConfirm } from "../components/ConfirmDialog";
 import { useAsyncAction } from "../hooks/useAsyncAction";
+
+// FAC-1 (AUDITORIA_FACTURAS.md): mismos valores que LIMITES de Viajes.tsx (H-11) y
+// Liquidaciones.tsx (LIQ-1).
+const LIMITES = [10, 20, 50, 100];
 
 function fmtMoney(n: number) {
   return new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 0 }).format(n || 0);
@@ -10,7 +15,13 @@ function fmtMoney(n: number) {
 export default function Facturas() {
   const confirm = useConfirm();
   const { busy, error, success, run } = useAsyncAction();
+  // FAC-1: paginación con persistencia en la URL (mismo criterio que Liquidaciones.tsx, LIQ-1) —
+  // el listado de Facturas no tiene filtros propios en la UI, solo page/limit se persisten.
+  const [searchParams, setSearchParams] = useSearchParams();
   const [facturas, setFacturas] = useState<any[]>([]);
+  const [pagina, setPagina] = useState(Number(searchParams.get("page")) || 1);
+  const [limite, setLimite] = useState(Number(searchParams.get("limit")) || 20);
+  const [total, setTotal] = useState(0);
   const [clientes, setClientes] = useState<any[]>([]);
   const [pendientes, setPendientes] = useState<any[]>([]);
   const [detalle, setDetalle] = useState<any>(null);
@@ -19,12 +30,30 @@ export default function Facturas() {
   const [form, setForm] = useState({ clienteId: "", numero: "", fecha: new Date().toISOString().slice(0, 10), vencimiento: "" });
   const [viajesSel, setViajesSel] = useState<Set<string>>(new Set());
 
-  function cargar() {
-    api.get("/facturas").then((res) => setFacturas(res.data));
+  // FAC-1: reemplaza a cargar() — mismo patrón que buscar() en Liquidaciones.tsx/Viajes.tsx.
+  function buscar(paginaNueva: number, limiteNueva: number) {
+    const params = { page: String(paginaNueva), limit: String(limiteNueva) };
+    setSearchParams(params, { replace: true });
+    api.get("/facturas", { params }).then((res) => {
+      setFacturas(res.data.datos);
+      setPagina(res.data.pagina);
+      setLimite(res.data.limite);
+      setTotal(res.data.total);
+    });
   }
+
+  function irAPagina(nuevaPagina: number) {
+    buscar(nuevaPagina, limite);
+  }
+
+  function cambiarLimite(nuevoLimite: number) {
+    buscar(1, nuevoLimite);
+  }
+
   useEffect(() => {
-    cargar();
+    buscar(pagina, limite);
     api.get("/clientes").then((res) => setClientes(res.data));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function buscarPendientes() {
@@ -47,7 +76,7 @@ export default function Facturas() {
         setPendientes([]);
         setViajesSel(new Set());
         setForm({ ...form, numero: "", vencimiento: "" });
-        cargar();
+        buscar(pagina, limite);
         return data;
       },
       {
@@ -76,7 +105,7 @@ export default function Facturas() {
         await api.post(`/facturas/${detalle.id}/cobranzas`, { ...cobranza, importe: importeCobranza });
         setCobranza({ fecha: new Date().toISOString().slice(0, 10), importe: "", medioPago: "" });
         await verDetalle(detalle.id);
-        cargar();
+        buscar(pagina, limite);
       },
       {
         successMessage: `Cobranza registrada por ${fmtMoney(importeCobranza)}.`,
@@ -97,7 +126,7 @@ export default function Facturas() {
     run(
       async () => {
         await api.post(`/facturas/${id}/anular`, {});
-        cargar();
+        buscar(pagina, limite);
         setDetalle(null);
       },
       {
@@ -108,6 +137,7 @@ export default function Facturas() {
   }
 
   const totalSel = pendientes.filter((v) => viajesSel.has(v.id)).reduce((acc, v) => acc + v.importeTotal, 0);
+  const totalPaginas = Math.max(1, Math.ceil(total / limite));
 
   return (
     <div>
@@ -186,6 +216,21 @@ export default function Facturas() {
             ))}
           </tbody>
         </table>
+        {facturas.length > 0 && (
+          <div className="actions-row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+            <div className="checkbox-row">
+              <button className="btn secondary" disabled={pagina <= 1} onClick={() => irAPagina(pagina - 1)}>Anterior</button>
+              <span className="muted">Página {pagina} de {totalPaginas} ({total} en total)</span>
+              <button className="btn secondary" disabled={pagina >= totalPaginas} onClick={() => irAPagina(pagina + 1)}>Siguiente</button>
+            </div>
+            <div className="checkbox-row">
+              <label className="muted">Por página</label>
+              <select value={limite} onChange={(e) => cambiarLimite(Number(e.target.value))}>
+                {LIMITES.map((l) => <option key={l} value={l}>{l}</option>)}
+              </select>
+            </div>
+          </div>
+        )}
       </div>
 
       {detalle && (

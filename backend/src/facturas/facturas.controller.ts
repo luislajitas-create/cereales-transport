@@ -32,6 +32,22 @@ const includeFactura = {
   cobranzas: { orderBy: { fecha: "asc" as const } },
 };
 
+// FAC-1 (AUDITORIA_FACTURAS.md): select propio para el listado — Facturas.tsx (único consumidor
+// real de GET /facturas) solo lee estos campos. findOne()/exports/create/anular/cobranzas siguen
+// usando includeFactura sin cambios.
+const selectFacturaListado = {
+  id: true,
+  numero: true,
+  fecha: true,
+  vencimiento: true,
+  importe: true,
+  estado: true,
+  cliente: { select: { razonSocial: true } },
+};
+
+const FACTURAS_LIMITE_DEFECTO = 20;
+const FACTURAS_LIMITE_MAXIMO = 100;
+
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller("facturas")
 export class FacturasController {
@@ -43,6 +59,8 @@ export class FacturasController {
     @Query("estado") estado?: string,
     @Query("desde") desde?: string,
     @Query("hasta") hasta?: string,
+    @Query("page") pageRaw?: string,
+    @Query("limit") limitRaw?: string,
   ) {
     const where: any = {};
     if (clienteId) where.clienteId = clienteId;
@@ -52,7 +70,24 @@ export class FacturasController {
       if (desde) where.fecha.gte = new Date(desde);
       if (hasta) where.fecha.lte = new Date(hasta);
     }
-    return this.prisma.factura.findMany({ where, include: includeFactura, orderBy: { fecha: "desc" } });
+
+    // FAC-1: mismo patrón que GET /viajes (H-11) y GET /liquidaciones (LIQ-1) — único
+    // consumidor real confirmado (Facturas.tsx), actualizado en el mismo commit.
+    const page = Math.max(1, parseInt(pageRaw ?? "", 10) || 1);
+    const limit = Math.min(FACTURAS_LIMITE_MAXIMO, Math.max(1, parseInt(limitRaw ?? "", 10) || FACTURAS_LIMITE_DEFECTO));
+
+    const [total, datos] = await Promise.all([
+      this.prisma.factura.count({ where }),
+      this.prisma.factura.findMany({
+        where,
+        select: selectFacturaListado,
+        orderBy: { fecha: "desc" },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+    ]);
+
+    return { datos, pagina: page, limite: limit, total };
   }
 
   @Get("export/excel")
