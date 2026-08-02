@@ -1,9 +1,13 @@
 import { useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { api } from "../api/client";
 import { useConfirm } from "../components/ConfirmDialog";
 import { useAsyncAction } from "../hooks/useAsyncAction";
 
 const CATEGORIAS_ADELANTO = ["Seguros", "Transferencia Bancaria", "Efectivo", "Combustible", "Otros"];
+// LIQ-1 (AUDITORIA_LIQUIDACIONES.md): mismos valores que LIMITES de Viajes.tsx (H-11) y
+// AuditoriaAdministrativa.tsx.
+const LIMITES = [10, 20, 50, 100];
 
 function fmtMoney(n: number) {
   return new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 0 }).format(n || 0);
@@ -12,7 +16,14 @@ function fmtMoney(n: number) {
 export default function Liquidaciones() {
   const confirm = useConfirm();
   const { busy, error, success, setError, run } = useAsyncAction();
+  // LIQ-1: filtros y persistencia en la URL (mismo criterio de L3/H-11 en Viajes.tsx). El
+  // listado principal de Liquidaciones no tiene filtros propios en la UI (a diferencia de
+  // Viajes) — solo page/limit se persisten acá.
+  const [searchParams, setSearchParams] = useSearchParams();
   const [liquidaciones, setLiquidaciones] = useState<any[]>([]);
+  const [pagina, setPagina] = useState(Number(searchParams.get("page")) || 1);
+  const [limite, setLimite] = useState(Number(searchParams.get("limit")) || 20);
+  const [total, setTotal] = useState(0);
   const [transportistas, setTransportistas] = useState<any[]>([]);
   const [choferes, setChoferes] = useState<any[]>([]);
   const [detalle, setDetalle] = useState<any>(null);
@@ -26,12 +37,33 @@ export default function Liquidaciones() {
   const [viajesSel, setViajesSel] = useState<Set<string>>(new Set());
   const [anticiposSel, setAnticiposSel] = useState<Set<string>>(new Set());
 
-  function cargar() {
-    api.get("/liquidaciones").then((res) => setLiquidaciones(res.data));
+  // LIQ-1 (AUDITORIA_LIQUIDACIONES.md): reemplaza a cargar() — mismo patrón que buscar() en
+  // Viajes.tsx (H-11): recibe page/limit explícitos (no los lee de pagina/limite por closure,
+  // para no quedar sujeto al retraso de un setState async) y sincroniza la URL con el mismo
+  // objeto de params usado en la request.
+  function buscar(paginaNueva: number, limiteNueva: number) {
+    const params = { page: String(paginaNueva), limit: String(limiteNueva) };
+    setSearchParams(params, { replace: true });
+    api.get("/liquidaciones", { params }).then((res) => {
+      setLiquidaciones(res.data.datos);
+      setPagina(res.data.pagina);
+      setLimite(res.data.limite);
+      setTotal(res.data.total);
+    });
   }
+
+  function irAPagina(nuevaPagina: number) {
+    buscar(nuevaPagina, limite);
+  }
+
+  function cambiarLimite(nuevoLimite: number) {
+    buscar(1, nuevoLimite);
+  }
+
   useEffect(() => {
-    cargar();
+    buscar(pagina, limite);
     api.get("/transportistas").then((res) => setTransportistas(res.data));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   useEffect(() => {
     if (form.tipo === "CHOFER" && form.transportistaId) {
@@ -70,7 +102,7 @@ export default function Liquidaciones() {
           anticipoIds: Array.from(anticiposSel),
         });
         setCandidatos(null);
-        cargar();
+        buscar(pagina, limite);
         await verDetalle(data.id);
         return data;
       },
@@ -98,7 +130,7 @@ export default function Liquidaciones() {
     run(
       async () => {
         await api.post(`/liquidaciones/${detalle.id}/confirmar`, {});
-        cargar();
+        buscar(pagina, limite);
         await verDetalle(detalle.id);
       },
       {
@@ -123,7 +155,7 @@ export default function Liquidaciones() {
     run(
       async () => {
         await api.post(`/liquidaciones/${detalle.id}/pagar`, {});
-        cargar();
+        buscar(pagina, limite);
         await verDetalle(detalle.id);
       },
       {
@@ -145,7 +177,7 @@ export default function Liquidaciones() {
     run(
       async () => {
         await api.post(`/liquidaciones/${detalle.id}/anular`, {});
-        cargar();
+        buscar(pagina, limite);
         await verDetalle(detalle.id);
       },
       {
@@ -178,6 +210,7 @@ export default function Liquidaciones() {
 
   const totalViajesSel = candidatos?.viajes.filter((v) => viajesSel.has(v.id)).reduce((acc, v) => acc + v.importeTotal, 0) || 0;
   const totalAnticiposSel = candidatos?.anticipos.filter((a) => anticiposSel.has(a.id)).reduce((acc, a) => acc + a.importe, 0) || 0;
+  const totalPaginas = Math.max(1, Math.ceil(total / limite));
 
   return (
     <div>
@@ -308,6 +341,21 @@ export default function Liquidaciones() {
             ))}
           </tbody>
         </table>
+        {liquidaciones.length > 0 && (
+          <div className="actions-row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+            <div className="checkbox-row">
+              <button className="btn secondary" disabled={pagina <= 1} onClick={() => irAPagina(pagina - 1)}>Anterior</button>
+              <span className="muted">Página {pagina} de {totalPaginas} ({total} en total)</span>
+              <button className="btn secondary" disabled={pagina >= totalPaginas} onClick={() => irAPagina(pagina + 1)}>Siguiente</button>
+            </div>
+            <div className="checkbox-row">
+              <label className="muted">Por página</label>
+              <select value={limite} onChange={(e) => cambiarLimite(Number(e.target.value))}>
+                {LIMITES.map((l) => <option key={l} value={l}>{l}</option>)}
+              </select>
+            </div>
+          </div>
+        )}
       </div>
 
       {detalle && (

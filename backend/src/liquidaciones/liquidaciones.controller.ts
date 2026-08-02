@@ -13,6 +13,28 @@ import { OrganizacionPrismaClient } from "../prisma/organizacion-prisma.client";
 import { CreateLiquidacionDto } from "./dto/create-liquidacion.dto";
 import { PagarLiquidacionDto } from "./dto/pagar-liquidacion.dto";
 
+// LIQ-1 (AUDITORIA_LIQUIDACIONES.md): select propio para el listado — Liquidaciones.tsx (único
+// consumidor real de GET /liquidaciones, confirmado con grep) solo lee estos campos. El resto
+// de los métodos (findOne, exports, construirPlanilla) sigue usando includeLiquidacion sin
+// cambios, porque ahí sí se necesita el árbol completo de viajes/movimientos.
+const selectLiquidacionListado = {
+  id: true,
+  numero: true,
+  tipo: true,
+  periodoDesde: true,
+  periodoHasta: true,
+  netoPagar: true,
+  estado: true,
+  transportista: { select: { razonSocial: true } },
+  chofer: { select: { nombre: true } },
+};
+
+// LIQ-1: mismos valores y mismo patrón que VIAJES_LIMITE_DEFECTO/MAXIMO (viajes.controller.ts,
+// H-11) y AUDITORIA_LIMITE_DEFECTO/MAXIMO (organizacion.controller.ts) — patrón de paginación
+// oficial del proyecto, replicado tal cual.
+const LIQUIDACIONES_LIMITE_DEFECTO = 20;
+const LIQUIDACIONES_LIMITE_MAXIMO = 100;
+
 const includeLiquidacion = {
   transportista: true,
   chofer: true,
@@ -169,17 +191,33 @@ export class LiquidacionesController {
     @Query("choferId") choferId?: string,
     @Query("estado") estado?: string,
     @Query("tipo") tipo?: string,
+    @Query("page") pageRaw?: string,
+    @Query("limit") limitRaw?: string,
   ) {
     const where: any = {};
     if (transportistaId) where.transportistaId = transportistaId;
     if (choferId) where.choferId = choferId;
     if (estado) where.estado = estado;
     if (tipo) where.tipo = tipo;
-    return this.prisma.liquidacion.findMany({
-      where,
-      include: includeLiquidacion,
-      orderBy: { createdAt: "desc" },
-    });
+
+    // LIQ-1 (AUDITORIA_LIQUIDACIONES.md): mismo patrón que GET /viajes (H-11) y
+    // GET /organizacion/auditoria — único consumidor real confirmado (Liquidaciones.tsx),
+    // actualizado en el mismo commit; cambio de contrato limpio, aprobado explícitamente.
+    const page = Math.max(1, parseInt(pageRaw ?? "", 10) || 1);
+    const limit = Math.min(LIQUIDACIONES_LIMITE_MAXIMO, Math.max(1, parseInt(limitRaw ?? "", 10) || LIQUIDACIONES_LIMITE_DEFECTO));
+
+    const [total, datos] = await Promise.all([
+      this.prisma.liquidacion.count({ where }),
+      this.prisma.liquidacion.findMany({
+        where,
+        select: selectLiquidacionListado,
+        orderBy: { createdAt: "desc" },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+    ]);
+
+    return { datos, pagina: page, limite: limit, total };
   }
 
   @Get("candidatos")
