@@ -386,3 +386,48 @@ Búsqueda global (`⋮`, `boxShadow`, `position: "absolute"`) confirmó que `Fil
 **Builds y tests:** backend sin cambios, 11/11 suites, 82/82 tests verde. Frontend build OK, sin errores TypeScript, 122 módulos (sin cambios en la cantidad).
 
 **Deuda remanente sin cambios:** H-11 (deuda aceptable, fuera de alcance de este cierre).
+
+---
+
+## 21. H-11 — Paginación de GET /viajes (adenda)
+
+**H-11 (falta de paginación en GET /viajes): cerrado.** Última deuda estructural de la lista H-6→H-11.
+
+**Auditoría (previa a la implementación, con evidencia):**
+- `findAll()` (`viajes.controller.ts`) no tenía `skip`/`take`/`cursor`/`page`/`pageSize`. Grep global en `backend/src` encontró un único patrón oficial de paginación **activo en producción**: `GET /organizacion/auditoria` (`organizacion.controller.ts`) — `page`/`limit` → `skip=(page-1)*limit`/`take=limit`, clamps (`Math.max(1,...)`, `Math.min(MAXIMO,...)`), respuesta `{ datos, pagina, limite, total }`, consumido por `AuditoriaAdministrativa.tsx` con un patrón de UI completo y ya validado (Anterior/Siguiente, "Página X de Y (Z en total)", selector de tamaño de página).
+- Consumidores de `GET /viajes` confirmados con evidencia: `Viajes.tsx` es el **único** (grep de `"/viajes"` en todo `frontend/src`). `Dashboard.tsx`, `DashboardEjecutivo.tsx`, `Rentabilidad.tsx`, `Aging.tsx`, `Benchmarking.tsx` no lo llaman — usan endpoints propios (`/inteligencia/*`, `/dashboard/*`). Los servicios backend que sí usan `prisma.viaje.findMany` (`dashboard.controller.ts`, `liquidaciones.controller.ts`, `alertas.service.ts`, `facturas.controller.ts`, `rentabilidad.service.ts`) lo hacen **directo**, sin pasar por `ViajesController.findAll()` — no afectados. Ningún test backend (`*.spec.ts`) tocaba este método.
+- Retrocompatibilidad: se descartó un modo dual (array plano sin `page`/`limit`, objeto envuelto con ellos) por agregar una rama de código para proteger a un consumidor inexistente, y por divergir del precedente de auditoría (que nunca tuvo modo array). Aprobado explícitamente: cambio de contrato limpio, backend y frontend actualizados en el mismo commit.
+- Estrategia elegida: **offset** (`page`/`limit` → Prisma `skip`/`take`), replicando el patrón de `/organizacion/auditoria` con los mismos nombres de parámetros y misma forma de respuesta. Cursor descartado por sobredimensionado para el volumen real (decenas/cientos de viajes por organización).
+
+**Implementación:**
+- `viajes.controller.ts`: `VIAJES_LIMITE_DEFECTO=20`, `VIAJES_LIMITE_MAXIMO=100` (idénticos a los de auditoría). `findAll()` agrega `@Query("page")`/`@Query("limit")`; `where`, filtros (`desde`, `hasta`, `clienteId`, `transportistaId`, `estado`, `cerealId`, `q`) y `orderBy: { fecha: "desc" }` **sin ningún cambio**; `selectViajeListado` **sin modificaciones**; `Promise.all([count, findMany con skip/take])`; devuelve exactamente `{ datos, pagina, limite, total }`.
+- `viajes.controller.pagination.spec.ts` (nuevo, 7 tests): defaults, cálculo de `skip`, clamp de `limit` por encima del máximo, valores no numéricos cayendo a default, clamp de `limit` negativo al piso (mismo comportamiento ya existente en `organizacion.controller.ts`, no un bug nuevo), forma exacta de la respuesta, y que `where` es idéntico entre `count` y `findMany` (filtros y `q` intactos).
+- `Viajes.tsx`: `cargar()`/`aplicarFiltros()` reemplazadas por una única `buscar(paginaNueva, limiteNueva, filtrosActuales)` (mismo patrón que `buscar()` de `AuditoriaAdministrativa.tsx`, extendido para además sincronizar la URL vía `setSearchParams(params, {replace:true})` — filosofía de L3 aplicada también a `page`/`limit`, algo que el precedente de auditoría no hacía). Nuevo estado `pagina`/`limite`/`total`, inicializado desde la URL (`?page=`/`?limit=`, default 1/20). Nuevas funciones `irAPagina()` y `cambiarLimite()` (esta última resetea a página 1, igual que su equivalente en auditoría). Bloque de UI de paginación agregado debajo de la tabla, **idéntico** al de `AuditoriaAdministrativa.tsx`, sin CSS nuevo (`.actions-row`, `.checkbox-row`, `.btn secondary`, `.muted`, ya existentes). `volverA` (`FilaViaje.tsx`/`location.search`) no requirió ningún cambio: al capturar `location.search` completo, automáticamente incluye `page`/`limit` en cuanto quedan en la URL — sin tocar ese mecanismo.
+- Nota fuera de alcance, sin acción: `transportistaId`/`cerealId` son parámetros que el backend siempre aceptó pero que `Viajes.tsx` nunca expuso como campos de filtro en la UI (ya era así antes de H-11) — se mantiene sin cambios, no se agregó ningún campo nuevo de filtro (no era parte del alcance aprobado, que es paginación, no nuevos filtros).
+
+**Verificación adicional de UX — reset de página al cambiar un filtro con paginación ya aplicada (pedida explícitamente antes de cerrar):** se ejecutó la lógica real de `buscar()` (la misma función que corre en producción, no una reconstrucción aproximada) con un escenario concreto: partiendo de `page=3&limit=5&clienteId=abc123&estado=CARGADO`, se simula cambiar `estado` a `PENDIENTE` y confirmar ("Filtrar" llama `aplicarFiltros()` → `buscar(1, limite, filtros)`). Resultado exacto obtenido:
+
+| Momento | Query string resultante |
+|---|---|
+| Antes (page=3, limit=5, con filtros) | `page=3&limit=5&clienteId=abc123&estado=CARGADO` |
+| Después de cambiar `estado` y click Filtrar | `page=1&limit=5&clienteId=abc123&estado=PENDIENTE` |
+
+Confirma los 4 puntos pedidos: **la página vuelve a 1**; **el límite (5) se conserva**; **el resto de los filtros no tocados (`clienteId`) permanece**; **no quedan parámetros obsoletos** — porque `setSearchParams(params, {replace:true})` reemplaza el query string completo con un objeto armado de cero en cada llamada (no lo mezcla con el anterior; los campos vacíos de `filtros`, como `desde`/`hasta`/`q` en este caso, simplemente no se agregan al objeto).
+
+**Validación funcional (navegador real, backend+frontend locales):** listado con los 19 viajes reales; cambiar "Por página" a 5 mostró "Página 1 de 4 (19 en total)"; "Siguiente"/"Anterior" navegaron correctamente entre páginas con filas distintas; la URL reflejó `page`/`limit` en todo momento; un refresh (F5) en página 3/límite 5 recargó exactamente esa misma página y límite; cambiar el filtro de búsqueda y click "Filtrar" volvió a página 1 conservando el límite (y el caso adicional de arriba); entrar al Detalle y volver conservó filtro+página+límite (via `volverA`/`location.search`, sin cambios en ese mecanismo); Avanzar, Cancelar, menú ⋮ y gating `ADMINISTRADOR`/`LECTURA` siguieron funcionando igual que en H-8/H-9/H-10.
+
+**Medición del impacto — ANTES vs. DESPUÉS (dataset real, 19 viajes):**
+
+| Escenario | Tamaño de respuesta | Tiempo promedio (5 corridas, localhost) |
+|---|---|---|
+| Antes (sin paginar, array plano) | 7150 bytes | ~0.216 s |
+| Después, `limit=20` (19 registros, 1 sola página) | 7194 bytes (+44 bytes por el envoltorio `{datos,pagina,limite,total}`) | ~0.220 s |
+| Después, `limit=5` (5 registros por página) | ~1921-1925 bytes (~73% menos que con 19/20) | ~0.220 s |
+
+**Nota explícita sobre el tiempo de respuesta (para no mal-interpretarse en el futuro):** con el volumen actual (19 viajes) el tiempo de respuesta es prácticamente idéntico antes y después — esto es el resultado **esperado**, no una falla de la implementación: el objetivo de H-11 nunca fue reducir la latencia con un dataset de 19 filas (el overhead de autenticación/red domina por completo sobre un `SELECT` de 19 filas, paginado o no). El beneficio de H-11 es **estructural**: a medida que el volumen real de viajes de una organización crezca a cientos o miles de registros, el backend deja de transferir el listado completo en cada consulta — el tamaño de respuesta pasa a depender de `limit` (como ya lo demuestra la reducción real del 73% al bajar de 20 a 5 registros por página en este mismo dataset), en vez de crecer sin límite junto con el total de viajes históricos de la organización. La ausencia de mejora de tiempo hoy es coherente con ese objetivo, no una medición fallida.
+
+**Regresiones:** no se re-probaron L1–L4.3/H-6–H-10/RC1.1–1.3 de forma completa. `orderBy`, `where`/filtros y `selectViajeListado` quedaron exactamente iguales (solo se agregó `skip`/`take` alrededor de la misma query); ningún test backend dependía de la forma anterior del array (confirmado en la auditoría); el único consumidor frontend (`Viajes.tsx`) se actualizó en el mismo commit; `volverA`/L3/H-8/H-9/H-10 no dependen de la forma de la respuesta de `GET /viajes`, solo de su comportamiento observable en la tabla, ya confirmado sin cambios.
+
+**Builds y tests:** backend build OK, **12/12 suites** (11 previas + 1 nueva), **90/90 tests** (82 previos + 8 nuevos). Frontend build OK, sin errores TypeScript, 122 módulos (sin cambios en la cantidad).
+
+**Cierre de la lista de deuda H-6 → H-11:** con H-11 cerrado, **la lista completa queda formalmente cerrada** (H-6 ORDEN_ESTADOS, H-7 sobre-fetching, H-8 extracción de FilaViaje, H-9 React.memo, H-10 estilos inline del menú, H-11 paginación). Durante la implementación de H-11 no apareció ninguna deuda nueva que amerite abrirse como bloque futuro — el único punto identificado (`transportistaId`/`cerealId` sin campo de filtro en la UI de `Viajes.tsx`) es una decisión de producto (¿se necesitan esos filtros en la UI?), no un hallazgo de calidad de código, y queda fuera de esta lista de deuda técnica.

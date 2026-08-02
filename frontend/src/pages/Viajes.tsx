@@ -4,6 +4,10 @@ import { api } from "../api/client";
 import { useAuth } from "../context/AuthContext";
 import FilaViaje from "../components/FilaViaje";
 
+// H-11 (AUDITORIA_VIAJES2.0_RC1.md, H-11): mismos valores que LIMITES de
+// AuditoriaAdministrativa.tsx (único precedente de paginación ya validado en el frontend).
+const LIMITES = [10, 20, 50, 100];
+
 export default function Viajes() {
   // L4.3 (AUDITORIA_VIAJES2.0_RC1.md, H-4): mismo criterio que ya usa FilaViaje más abajo —
   // duplicado deliberado (es una constante de una línea, no amerita una abstracción nueva).
@@ -22,34 +26,56 @@ export default function Viajes() {
     estado: searchParams.get("estado") || "",
     q: searchParams.get("q") || "",
   });
+  // H-11 (AUDITORIA_VIAJES2.0_RC1.md, H-11): mismo criterio de L3 (filtros persistidos en la
+  // URL) extendido a page/limit, para que un refresh o un link directo reproduzca exactamente
+  // la misma página y tamaño de página, no solo los mismos filtros.
+  const [pagina, setPagina] = useState(Number(searchParams.get("page")) || 1);
+  const [limite, setLimite] = useState(Number(searchParams.get("limit")) || 20);
+  const [total, setTotal] = useState(0);
   const [error, setError] = useState("");
 
-  function cargar() {
-    const params: any = {};
-    Object.entries(filtros).forEach(([k, v]) => {
-      if (v) params[k] = v;
-    });
-    api
-      .get("/viajes", { params })
-      .then((res) => setViajes(res.data))
-      .catch(() => setError("No se pudieron cargar los viajes"));
-  }
-
-  // Sincroniza la URL con los filtros vigentes al momento de aplicar — "replace" para no dejar
-  // una entrada de historial por cada clic en "Filtrar" (evitaría que "atrás" quede atascado
-  // deshaciendo filtros en vez de volver a la pantalla anterior real).
-  function aplicarFiltros() {
-    const params: Record<string, string> = {};
-    Object.entries(filtros).forEach(([k, v]) => {
+  // H-11: reemplaza a cargar()/aplicarFiltros() — mismo patrón que buscar() en
+  // AuditoriaAdministrativa.tsx (único precedente de paginación ya validado), extendido acá
+  // para además sincronizar la URL (L3), algo que ese precedente no hacía. Recibe page/limit/
+  // filtros explícitos (no los lee de `pagina`/`limite`/`filtros` por closure) para no quedar
+  // sujeto al retraso de un `setState` async — el mismo objeto de params se usa tanto para la
+  // URL como para la request, así ambos quedan siempre en sincronía.
+  function buscar(paginaNueva: number, limiteNueva: number, filtrosActuales: typeof filtros) {
+    const params: Record<string, string> = { page: String(paginaNueva), limit: String(limiteNueva) };
+    Object.entries(filtrosActuales).forEach(([k, v]) => {
       if (v) params[k] = v;
     });
     setSearchParams(params, { replace: true });
-    cargar();
+    api
+      .get("/viajes", { params })
+      .then((res) => {
+        setViajes(res.data.datos);
+        setPagina(res.data.pagina);
+        setLimite(res.data.limite);
+        setTotal(res.data.total);
+      })
+      .catch(() => setError("No se pudieron cargar los viajes"));
+  }
+
+  // Cambiar un filtro o la búsqueda vuelve siempre a la página 1 (no tendría sentido conservar
+  // una página que puede ya no existir con el nuevo resultado filtrado); conserva el límite
+  // vigente. Mismo criterio que cambiarLimite() de AuditoriaAdministrativa.tsx.
+  function aplicarFiltros() {
+    buscar(1, limite, filtros);
+  }
+
+  function irAPagina(nuevaPagina: number) {
+    buscar(nuevaPagina, limite, filtros);
+  }
+
+  function cambiarLimite(nuevoLimite: number) {
+    buscar(1, nuevoLimite, filtros);
   }
 
   useEffect(() => {
-    cargar();
+    buscar(pagina, limite, filtros);
     api.get("/clientes").then((res) => setClientes(res.data));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // H-9 (AUDITORIA_VIAJES2.0_RC1.md, H-9): useCallback con deps vacías — solo usa el setter de
@@ -59,6 +85,8 @@ export default function Viajes() {
   const actualizarEstadoFila = useCallback((id: string, nuevoEstado: string) => {
     setViajes((prev) => prev.map((v) => (v.id === id ? { ...v, estado: nuevoEstado } : v)));
   }, []);
+
+  const totalPaginas = Math.max(1, Math.ceil(total / limite));
 
   return (
     <div>
@@ -133,6 +161,22 @@ export default function Viajes() {
           )}
         </tbody>
       </table>
+
+      {viajes.length > 0 && (
+        <div className="actions-row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+          <div className="checkbox-row">
+            <button className="btn secondary" disabled={pagina <= 1} onClick={() => irAPagina(pagina - 1)}>Anterior</button>
+            <span className="muted">Página {pagina} de {totalPaginas} ({total} en total)</span>
+            <button className="btn secondary" disabled={pagina >= totalPaginas} onClick={() => irAPagina(pagina + 1)}>Siguiente</button>
+          </div>
+          <div className="checkbox-row">
+            <label className="muted">Por página</label>
+            <select value={limite} onChange={(e) => cambiarLimite(Number(e.target.value))}>
+              {LIMITES.map((l) => <option key={l} value={l}>{l}</option>)}
+            </select>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

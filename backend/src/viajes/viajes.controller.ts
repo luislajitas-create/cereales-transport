@@ -14,6 +14,12 @@ import { CancelarViajeDto } from "./dto/cancelar-viaje.dto";
 
 const ORDEN_ESTADOS = ["PENDIENTE", "ASIGNADO", "EN_CARGA", "CARGADO", "EN_TRANSITO", "DESCARGADO"];
 
+// H-11 (AUDITORIA_VIAJES2.0_RC1.md, H-11): mismos valores y mismo patrón que
+// AUDITORIA_LIMITE_DEFECTO/MAXIMO de organizacion.controller.ts (GET /organizacion/auditoria) —
+// único precedente de paginación activo en el proyecto.
+const VIAJES_LIMITE_DEFECTO = 20;
+const VIAJES_LIMITE_MAXIMO = 100;
+
 const includeViaje = {
   cereal: true, cliente: true, productor: true, transportista: true, chofer: true,
   camion: true, acoplado: true, origen: true, destino: true,
@@ -109,6 +115,8 @@ export class ViajesController {
     @Query("estado") estado?: string,
     @Query("cerealId") cerealId?: string,
     @Query("q") q?: string,
+    @Query("page") pageRaw?: string,
+    @Query("limit") limitRaw?: string,
   ) {
     const where: any = {};
     if (desde || hasta) {
@@ -149,7 +157,24 @@ export class ViajesController {
       }
     }
 
-    return this.prisma.viaje.findMany({ where, select: selectViajeListado, orderBy: { fecha: "desc" } });
+    // H-11 (AUDITORIA_VIAJES2.0_RC1.md, H-11): mismo patrón que GET /organizacion/auditoria —
+    // único consumidor real confirmado (Viajes.tsx), actualizado en el mismo commit; cambio de
+    // contrato limpio (sin modo dual array/objeto), aprobado explícitamente.
+    const page = Math.max(1, parseInt(pageRaw ?? "", 10) || 1);
+    const limit = Math.min(VIAJES_LIMITE_MAXIMO, Math.max(1, parseInt(limitRaw ?? "", 10) || VIAJES_LIMITE_DEFECTO));
+
+    const [total, datos] = await Promise.all([
+      this.prisma.viaje.count({ where }),
+      this.prisma.viaje.findMany({
+        where,
+        select: selectViajeListado,
+        orderBy: { fecha: "desc" },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+    ]);
+
+    return { datos, pagina: page, limite: limit, total };
   }
 
   @Get("pendientes-facturar")
