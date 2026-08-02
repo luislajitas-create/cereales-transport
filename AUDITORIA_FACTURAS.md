@@ -41,3 +41,19 @@ Registro de bloques de deuda técnica y modularización del módulo Facturación
 - `Facturas.tsx` sin extracción de subcomponentes ni `React.memo`.
 - Falta de gating de rol en la UI (el backend ya exige `@Roles("FACTURACION","ADMINISTRADOR")` correctamente).
 - N+1 evitable en `anular()` (loop de `update` idéntico reemplazable por `updateMany`).
+
+---
+
+## FAC-2 — Extraer FilaFactura a componente propio
+
+**Objetivo:** iniciar la modularización de Facturación con el mismo criterio mecánico ya aplicado en H-8 (`FilaViaje`) y LIQ-2 (`FilaLiquidacion`) — extraer únicamente la fila del listado, sin tocar lógica, estado, hooks ni `React.memo`.
+
+**Implementación:** nuevo `frontend/src/components/FilaFactura.tsx` — componente puramente presentacional (celdas + botón "Ver" que dispara `onVerDetalle(id)`), con su propia copia local de `fmtMoney` (mismo criterio que `FilaLiquidacion.tsx`: se sigue usando en muchos otros lugares de `Facturas.tsx`, no se movió). Props: `{ factura: any; onVerDetalle: (id: string) => void }`. `Facturas.tsx`: el `.map()` inline de la fila se reemplazó por `<FilaFactura key={f.id} factura={f} onVerDetalle={verDetalle} />`. El padre sigue manejando listado, paginación, detalle, estado y callbacks. Sin estado interno nuevo, sin `React.memo`, sin hooks nuevos — mismo alcance mínimo pedido.
+
+**Validación funcional (navegador real):** listado visualmente idéntico; paginación, refresh, Ver, Buscar viajes pendientes/Crear factura, Registrar cobranza, Anular factura, Conciliación funcionan exactamente igual. Confirmado por el usuario (checklist combinado FAC-1+FAC-2).
+
+**Regresiones:** ninguna — cambio puramente mecánico de ubicación de código (mismo patrón que H-8/LIQ-2), sin tocar lógica, contratos ni backend.
+
+**Builds y tests:** backend sin cambios, 14/14 suites, 104/104 tests verde. Frontend build OK, sin errores TypeScript, 124 módulos (+1 por el archivo nuevo).
+
+**Deuda remanente sin cambios (backlog):** falta de gating de rol en la UI, N+1 evitable en `anular()`, Detalle/Formulario/Confirmaciones/Exports/Conciliación sin extraer.

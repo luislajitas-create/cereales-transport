@@ -3,6 +3,7 @@ import { useSearchParams } from "react-router-dom";
 import { api } from "../api/client";
 import { useConfirm } from "../components/ConfirmDialog";
 import { useAsyncAction } from "../hooks/useAsyncAction";
+import FilaFactura from "../components/FilaFactura";
 
 // FAC-1 (AUDITORIA_FACTURAS.md): mismos valores que LIMITES de Viajes.tsx (H-11) y
 // Liquidaciones.tsx (LIQ-1).
@@ -204,15 +205,7 @@ export default function Facturas() {
           <thead><tr><th>Número</th><th>Cliente</th><th>Fecha</th><th>Vencimiento</th><th>Importe</th><th>Estado</th><th></th></tr></thead>
           <tbody>
             {facturas.map((f) => (
-              <tr key={f.id}>
-                <td>{f.numero}</td>
-                <td>{f.cliente?.razonSocial}</td>
-                <td>{new Date(f.fecha).toLocaleDateString()}</td>
-                <td>{new Date(f.vencimiento).toLocaleDateString()}</td>
-                <td>{fmtMoney(f.importe)}</td>
-                <td><span className={`badge ${f.estado}`}>{f.estado}</span></td>
-                <td><button className="btn secondary" onClick={() => verDetalle(f.id)}>Ver</button></td>
-              </tr>
+              <FilaFactura key={f.id} factura={f} onVerDetalle={verDetalle} />
             ))}
           </tbody>
         </table>
