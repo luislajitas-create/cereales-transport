@@ -24,6 +24,8 @@ export default function ViajeDetalle() {
   const puedeGestionarViajes = usuario?.rol === "OPERACIONES" || usuario?.rol === "ADMINISTRADOR";
   const [viaje, setViaje] = useState<any>(null);
   const [error, setError] = useState("");
+  // DOC-1: mismo patrón de descarga que Facturas.tsx/Liquidaciones.tsx (blob + createObjectURL).
+  const [descargando, setDescargando] = useState(false);
   // RC1.2 (AUDITORIA_VIAJES2.0_RC1.md, H-3): dos instancias independientes, mismo patrón ya
   // usado en frontend/src/components/FilaViaje.tsx (L4.1/L4.2) — reemplazan el guard manual por
   // useState que tenía esta pantalla (ventana de doble-clic más ancha que el guard por ref de
@@ -57,6 +59,26 @@ export default function ViajeDetalle() {
   }
 
   useEffect(() => { cargar(); }, [id]);
+
+  async function descargarDocumento() {
+    if (!viaje) return;
+    setDescargando(true);
+    try {
+      const { data } = await api.get(`/viajes/${viaje.id}/documento`, { responseType: "blob" });
+      const url = window.URL.createObjectURL(new Blob([data]));
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `documento-viaje-${viaje.numeroViaje}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+    } catch {
+      setError("No se pudo generar el documento operativo");
+    } finally {
+      setDescargando(false);
+    }
+  }
 
   function avanzarEstado() {
     if (!viaje) return;
@@ -139,6 +161,12 @@ export default function ViajeDetalle() {
         {viaje.observaciones && <p className="muted">Obs: {viaje.observaciones}</p>}
 
         <div className="actions-row">
+          {/* DOC-1: documento operativo — disponible para cualquier rol que pueda ver el
+              Detalle (es una acción de lectura/impresión, no una mutación; no requiere el
+              mismo gating que Editar/Avanzar/Cancelar). */}
+          <button className="btn secondary" disabled={descargando} onClick={descargarDocumento}>
+            {descargando ? "Generando..." : "Documento Operativo"}
+          </button>
           {/* Núcleo Viajes 2.0, Tarea 4: siempre visible, sin condicionar por estado — el
               backend permite editar "observaciones"/"productorId" incluso con el viaje
               CANCELADO o ya facturado/liquidado (ver update() en viajes.controller.ts); los

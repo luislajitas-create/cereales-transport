@@ -1,6 +1,8 @@
 import {
-  Body, Controller, Get, Inject, Param, Patch, Post, Query, UseGuards, BadRequestException, NotFoundException,
+  Body, Controller, Get, Inject, Param, Patch, Post, Query, Res, UseGuards, BadRequestException, NotFoundException,
 } from "@nestjs/common";
+import { Response } from "express";
+import PDFDocument = require("pdfkit");
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
 import { RolesGuard } from "../auth/roles.guard";
 import { Roles } from "../auth/roles.decorator";
@@ -204,6 +206,87 @@ export class ViajesController {
     });
     if (!viaje) throw new NotFoundException(VIAJE_NO_ENCONTRADO);
     return viaje;
+  }
+
+  // DOC-1: documento operativo imprimible — NO es una factura ni una liquidación, es el papel
+  // que acompaña al camión. Reutiliza la misma infraestructura ya usada por Facturas/
+  // Liquidaciones (pdfkit + doc.pipe(res)), sin tocar esos controllers. Ubicacion no tiene un
+  // campo de dirección propio (schema.prisma: solo nombre/tipo/localidad) — se usa "localidad",
+  // no se inventa un dato que el sistema no tiene.
+  @Get(":id/documento")
+  async documentoOperativo(@Param("id") id: string, @CurrentUser() actor: any, @Res() res: Response) {
+    const viaje = await this.prisma.viaje.findUnique({ where: { id }, include: includeViaje });
+    if (!viaje) throw new NotFoundException(VIAJE_NO_ENCONTRADO);
+    const organizacion = await this.prisma.organizacion.findUnique({ where: { id: actor.organizacionId } });
+
+    res.set({
+      "Content-Type": "application/pdf",
+      "Content-Disposition": `attachment; filename="documento-viaje-${viaje.numeroViaje}.pdf"`,
+    });
+
+    const doc = new PDFDocument({ margin: 40 });
+    doc.pipe(res);
+
+    doc.fontSize(14).font("Helvetica-Bold").text(organizacion?.nombre || "—", { align: "center" });
+    doc.fontSize(16).text("Documento Operativo de Viaje", { align: "center" });
+    doc.fontSize(11).font("Helvetica").text(`Viaje N° ${viaje.numeroViaje}  ·  Fecha: ${new Date(viaje.fecha).toLocaleDateString("es-AR")}`, {
+      align: "center",
+    });
+    doc.moveDown(1);
+
+    function seccion(titulo: string) {
+      doc.moveDown(0.4);
+      doc.fontSize(11).font("Helvetica-Bold").text(titulo);
+      doc.moveTo(doc.x, doc.y).lineTo(555, doc.y).stroke();
+      doc.moveDown(0.3);
+      doc.font("Helvetica").fontSize(10);
+    }
+
+    function fila(label: string, valor: string) {
+      doc.text(`${label}: ${valor || "—"}`);
+    }
+
+    seccion("Datos comerciales");
+    fila("Cliente", viaje.cliente?.razonSocial);
+    fila("Productor", viaje.productor?.nombre);
+    fila("Cereal", viaje.cereal?.nombre);
+    fila("Toneladas", String(viaje.toneladas));
+
+    seccion("Origen");
+    fila("Nombre", viaje.origen?.nombre);
+    fila("Localidad", viaje.origen?.localidad || undefined);
+
+    seccion("Destino");
+    fila("Nombre", viaje.destino?.nombre);
+    fila("Localidad", viaje.destino?.localidad || undefined);
+
+    seccion("Transporte");
+    fila("Transportista", viaje.transportista?.razonSocial);
+    fila("Chofer", viaje.chofer?.nombre);
+    fila("Camión", viaje.camion?.patente);
+    fila("Acoplado", viaje.acoplado?.patente);
+
+    seccion("Documentación");
+    fila("CTG", viaje.ctg);
+    fila("Carta de porte", viaje.cartaPorte);
+
+    seccion("Estado del viaje");
+    fila("Estado", viaje.estado);
+
+    seccion("Observaciones");
+    doc.text(viaje.observaciones || "Sin observaciones.");
+
+    doc.moveDown(2.5);
+    const anchoFirma = 150;
+    const y = doc.y;
+    const firmas = ["Firma Transportista", "Firma Cliente", "Firma Destino"];
+    firmas.forEach((label, i) => {
+      const x = 40 + i * (anchoFirma + 20);
+      doc.moveTo(x, y).lineTo(x + anchoFirma, y).stroke();
+      doc.fontSize(9).text(label, x, y + 4, { width: anchoFirma, align: "center" });
+    });
+
+    doc.end();
   }
 
   @Roles("OPERACIONES", "ADMINISTRADOR")
