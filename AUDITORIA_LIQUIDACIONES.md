@@ -42,3 +42,37 @@ Registro de bloques de deuda técnica y mejoras arquitectónicas del módulo Liq
 - Falta de gating de rol en la UI de `Liquidaciones.tsx` (el backend ya exige `@Roles("LIQUIDACIONES","ADMINISTRADOR")` correctamente vía `RolesGuard`) — incluye la acción irreversible "Marcar como pagada".
 - N+1 evitable en `pagar()`/`anular()` (loops de `update` idéntico reemplazables por `updateMany`).
 - `CATEGORIAS_ADELANTO` duplicado entre `liquidaciones.controller.ts` y `Liquidaciones.tsx`.
+
+---
+
+## LIQ-2 — Extraer FilaLiquidacion a componente propio
+
+**Objetivo:** dejar el listado de Liquidaciones con la misma arquitectura ya alcanzada en Viajes 2.0 (H-8), sin modificar comportamiento, contratos ni backend.
+
+**Auditoría previa a la implementación:**
+1. **Líneas del archivo:** 546 (post LIQ-1, antes de esta extracción).
+2. **Responsabilidades del archivo:** formulario "Nueva liquidación", búsqueda/selección de candidatos, creación de liquidación, listado paginado, detalle (KPIs + planilla + adelantos generales + tabla técnica), ciclo de vida (confirmar/pagar/anular), descarga Excel/PDF, mensajes globales.
+3. **Qué convenía extraer:** únicamente la fila `<tr>` del listado principal — análogo exacto a `FilaViaje` (H-8).
+4. **Lógica mezclada:** mínima — a diferencia de `FilaViaje` (que tenía `useAsyncAction` propio y menú contextual), la fila de Liquidaciones es puramente presentacional: celdas de datos + un botón "Ver" que dispara un callback del padre.
+5. **Callbacks que quedan en el padre:** `verDetalle(id)` — gestiona el estado `detalle`, que permanece en `Liquidaciones.tsx` (fuera de alcance).
+6. **Estado que permanece en el padre:** todo el existente (`liquidaciones`, `pagina`, `limite`, `total`, `detalle`, `form`, `candidatos`, `viajesSel`, `anticiposSel`, `descargando`, `detalleTecnicoAbierto`, `transportistas`, `choferes`, `busy/error/success`).
+7. **Estado que baja al hijo:** ninguno — la fila no necesita estado propio.
+8. **Props de `FilaLiquidacion`:** `{ liquidacion: any; onVerDetalle: (id: string) => void }`.
+9. **Riesgo de prop drilling:** ninguno — un solo nivel de anidamiento, 2 props.
+10. **Alternativas evaluadas:** A) extraer solo `FilaLiquidacion` (elegida — mismo criterio mecánico que H-8, `<table>`/`<thead>`/paginación quedan inline en el padre); B) extraer además un `ListadoLiquidaciones.tsx` que envuelva tabla+paginación completas (descartada — sería una extracción más agresiva que la que Viajes 2.0 aplicó, y la consigna pedía "exactamente el mismo criterio"); C) no extraer nada (descartada, no cumple el objetivo del bloque).
+11. **Elegida:** A.
+12. **Por qué:** consistencia estricta con el precedente de H-8, y la tabla de Liquidaciones (sin filtros propios en la UI) es más simple que la de Viajes, sin necesidad real de encapsular más que la fila.
+
+**React.memo — auditado, NO aplicado, con evidencia:** tras crear/confirmar/pagar/anular, el código llama `buscar(pagina, limite)`, que reemplaza el array `liquidaciones` **completo** con objetos nuevos en cada actualización (`setLiquidaciones(res.data.datos)`). A diferencia de `actualizarEstadoFila` en Viajes (que preserva la referencia de las filas no tocadas vía `.map()` condicional), acá no existe un mecanismo de actualización local parcial — implementarlo sería un cambio de comportamiento/contrato, fuera de alcance de este bloque. Con el array completo reemplazándose siempre, `React.memo` no evitaría ningún render real: todas las filas reciben una referencia nueva en cada actualización, memo o no. Ni `React.memo` ni `useCallback` en `onVerDetalle` aportan nada medible en este bloque — mismo criterio de rigor que H-9 (confirmar el efecto real antes de aplicar memo, no aplicarlo por hábito).
+
+**Implementación:**
+- Nuevo `frontend/src/components/FilaLiquidacion.tsx`: componente puramente presentacional, con su propia copia local de `fmtMoney` (no se movió desde `Liquidaciones.tsx` porque ahí se sigue usando en muchos otros lugares — KPIs, planilla, candidatos; duplicarla una vez más es consistente con la convención ya existente en el proyecto, donde `fmtMoney` está duplicada en ~4 controllers backend y ~14 páginas frontend).
+- `frontend/src/pages/Liquidaciones.tsx`: el `.map()` inline de la fila del listado se reemplazó por `<FilaLiquidacion key={l.id} liquidacion={l} onVerDetalle={verDetalle} />`. Nada más se tocó.
+
+**Validación funcional (navegador real):** listado visualmente idéntico; paginación, refresh, Ver, Confirmar/Pagar/Anular, Excel/PDF y Nueva liquidación funcionan exactamente igual que antes de la extracción. Confirmado por el usuario (checklist combinado LIQ-1+LIQ-2).
+
+**Regresiones:** ninguna — cambio puramente mecánico de ubicación de código (mismo patrón que H-8 en Viajes), sin tocar lógica, contratos ni backend.
+
+**Builds y tests:** backend sin cambios, 13/13 suites, 97/97 tests verde. Frontend build OK, sin errores TypeScript, 123 módulos (+1 por el archivo nuevo).
+
+**Deuda remanente sin cambios (backlog):** falta de gating de rol en la UI, N+1 evitable en `pagar()`/`anular()`, `CATEGORIAS_ADELANTO` duplicado, Detalle/Formulario/Confirmaciones/Exports sin extraer (fuera de alcance explícito de LIQ-2).

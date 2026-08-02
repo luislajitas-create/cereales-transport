@@ -3,6 +3,7 @@ import { useSearchParams } from "react-router-dom";
 import { api } from "../api/client";
 import { useConfirm } from "../components/ConfirmDialog";
 import { useAsyncAction } from "../hooks/useAsyncAction";
+import FilaLiquidacion from "../components/FilaLiquidacion";
 
 const CATEGORIAS_ADELANTO = ["Seguros", "Transferencia Bancaria", "Efectivo", "Combustible", "Otros"];
 // LIQ-1 (AUDITORIA_LIQUIDACIONES.md): mismos valores que LIMITES de Viajes.tsx (H-11) y
@@ -329,15 +330,7 @@ export default function Liquidaciones() {
           <thead><tr><th>N°</th><th>Tipo</th><th>Transportista / Chofer</th><th>Período</th><th className="num">Neto a pagar</th><th>Estado</th><th></th></tr></thead>
           <tbody>
             {liquidaciones.map((l) => (
-              <tr key={l.id}>
-                <td>{l.numero}</td>
-                <td>{l.tipo}</td>
-                <td>{l.transportista?.razonSocial || l.chofer?.nombre}</td>
-                <td>{new Date(l.periodoDesde).toLocaleDateString()} - {new Date(l.periodoHasta).toLocaleDateString()}</td>
-                <td className="num">{fmtMoney(l.netoPagar)}</td>
-                <td><span className={`badge ${l.estado}`}>{l.estado}</span></td>
-                <td><button className="btn secondary" onClick={() => verDetalle(l.id)}>Ver</button></td>
-              </tr>
+              <FilaLiquidacion key={l.id} liquidacion={l} onVerDetalle={verDetalle} />
             ))}
           </tbody>
         </table>
