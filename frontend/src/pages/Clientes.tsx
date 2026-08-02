@@ -11,11 +11,47 @@ export default function Clientes() {
   const [error, setError] = useState("");
   const [seleccionado, setSeleccionado] = useState<string | null>(null);
   const [cuentaCorriente, setCuentaCorriente] = useState<any>(null);
+  // CAT-1: importación masiva por CSV — camino adicional al alta individual de arriba, no un
+  // reemplazo.
+  const [archivoImportar, setArchivoImportar] = useState<File | null>(null);
+  const [importando, setImportando] = useState(false);
+  const [resultadoImportacion, setResultadoImportacion] = useState<{ total: number; creados: number; rechazados: number; detalle: { fila: number; ok: boolean; mensaje: string }[] } | null>(null);
 
   function cargar() {
     api.get("/clientes").then((res) => setClientes(res.data));
   }
   useEffect(() => { cargar(); }, []);
+
+  async function descargarPlantillaImportacion() {
+    const { data } = await api.get("/clientes/importar/plantilla", { responseType: "blob" });
+    const url = window.URL.createObjectURL(new Blob([data]));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "plantilla-clientes.csv";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.URL.revokeObjectURL(url);
+  }
+
+  async function importarCsv() {
+    if (!archivoImportar) return;
+    setImportando(true);
+    setError("");
+    setResultadoImportacion(null);
+    try {
+      const formData = new FormData();
+      formData.append("archivo", archivoImportar);
+      const { data } = await api.post("/clientes/importar", formData);
+      setResultadoImportacion(data);
+      setArchivoImportar(null);
+      cargar();
+    } catch (err: any) {
+      setError(err?.response?.data?.message || "No se pudo importar el archivo");
+    } finally {
+      setImportando(false);
+    }
+  }
 
   async function crear(e: React.FormEvent) {
     e.preventDefault();
@@ -58,6 +94,31 @@ export default function Clientes() {
         </div>
         <div className="actions-row"><button className="btn" type="submit">Agregar</button></div>
       </form>
+
+      <div className="card">
+        <div className="section-title">Importar desde CSV</div>
+        <p className="muted">Cargá varios clientes a la vez. Descargá la plantilla para saber qué columnas usar.</p>
+        <div className="actions-row">
+          <button className="btn secondary" type="button" onClick={descargarPlantillaImportacion}>Descargar plantilla</button>
+          <input type="file" accept=".csv" onChange={(e) => setArchivoImportar(e.target.files?.[0] || null)} />
+          <button className="btn" type="button" disabled={!archivoImportar || importando} onClick={importarCsv}>
+            {importando ? "Importando..." : "Importar"}
+          </button>
+        </div>
+        {resultadoImportacion && (
+          <div className={resultadoImportacion.rechazados > 0 ? "warning-banner" : "success-banner"}>
+            <strong>{resultadoImportacion.creados} de {resultadoImportacion.total} clientes creados</strong>
+            {resultadoImportacion.rechazados > 0 && ` — ${resultadoImportacion.rechazados} rechazados:`}
+            {resultadoImportacion.rechazados > 0 && (
+              <ul style={{ margin: "0.4rem 0 0", paddingLeft: "1.2rem" }}>
+                {resultadoImportacion.detalle.filter((d) => !d.ok).map((d) => (
+                  <li key={d.fila}>Fila {d.fila}: {d.mensaje}</li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
+      </div>
 
       <table>
         <thead><tr><th>Razón social</th><th>CUIT</th><th>Condiciones</th><th>Activo</th><th></th></tr></thead>

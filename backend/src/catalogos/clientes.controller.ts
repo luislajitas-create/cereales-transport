@@ -1,19 +1,28 @@
-import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Query, Res, UseGuards } from "@nestjs/common";
+import { BadRequestException, Body, Controller, Delete, Get, Inject, Param, Patch, Post, Query, Res, UploadedFile, UseGuards, UseInterceptors } from "@nestjs/common";
+import { FileInterceptor } from "@nestjs/platform-express";
 import { Response } from "express";
 import * as ExcelJS from "exceljs";
 import PDFDocument = require("pdfkit");
+import { plainToInstance } from "class-transformer";
+import { validate } from "class-validator";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
 import { RolesGuard } from "../auth/roles.guard";
 import { Roles } from "../auth/roles.decorator";
 import { ORGANIZACION_PRISMA } from "../prisma/organizacion-prisma.token";
 import { OrganizacionPrismaClient } from "../prisma/organizacion-prisma.client";
 import { encontrarOFallar } from "../common/encontrar-o-fallar";
+import { parsearCsv, filasComoObjetos } from "../common/csv";
 import { CreateClienteDto } from "./dto/create-cliente.dto";
 import { UpdateClienteDto } from "./dto/update-cliente.dto";
 
 function fmtMoney(n: number) {
   return new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 0 }).format(n || 0);
 }
+
+// CAT-1: mismas columnas de CreateClienteDto (sin "contactos" — es una relación anidada, no un
+// dato plano de fila de CSV; se crea sin contactos, se agregan después individualmente si hace
+// falta). Encabezados exactos esperados en el CSV subido.
+const PLANTILLA_CLIENTES_CSV = 'razonSocial,cuit,condicionesComerciales\n"Cliente Ejemplo S.A.",30-12345678-9,"Pago a 30 días"\n';
 
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller("clientes")
@@ -27,6 +36,59 @@ export class ClientesController {
       include: { contactos: true },
       orderBy: { razonSocial: "asc" },
     });
+  }
+
+  // CAT-1: declarado antes de @Get(":id") — "importar" no debe interpretarse como un id.
+  @Get("importar/plantilla")
+  plantillaImportacion(@Res() res: Response) {
+    res.set({
+      "Content-Type": "text/csv; charset=utf-8",
+      "Content-Disposition": 'attachment; filename="plantilla-clientes.csv"',
+    });
+    res.send(PLANTILLA_CLIENTES_CSV);
+  }
+
+  // CAT-1 (importación masiva): cada fila se valida con el mismo CreateClienteDto que usa el
+  // alta individual (misma regla, no se reimplementa nada) y se procesa de forma independiente
+  // — una fila inválida o que falle al crear no aborta el archivo completo ni las demás filas
+  // válidas. No se verifica CUIT duplicado: el alta individual (create() de arriba) tampoco lo
+  // hace hoy en ningún lugar del sistema (confirmado en el schema: cuit no es @unique) — mismo
+  // criterio, no se inventa una regla nueva solo para la importación masiva.
+  @Roles("OPERACIONES", "FACTURACION", "ADMINISTRADOR")
+  @Post("importar")
+  @UseInterceptors(FileInterceptor("archivo", { limits: { fileSize: 2 * 1024 * 1024 } }))
+  async importar(@UploadedFile() archivo?: Express.Multer.File) {
+    if (!archivo) throw new BadRequestException("Debe adjuntar un archivo CSV en el campo 'archivo'.");
+    const filas = filasComoObjetos(parsearCsv(archivo.buffer.toString("utf-8")));
+    if (filas.length === 0) throw new BadRequestException("El archivo no tiene filas de datos para importar.");
+
+    const detalle: { fila: number; ok: boolean; mensaje: string }[] = [];
+    let creados = 0;
+    for (let i = 0; i < filas.length; i++) {
+      const numeroFila = i + 2; // fila 1 es el encabezado
+      const registro = filas[i];
+      const dto = plainToInstance(CreateClienteDto, {
+        razonSocial: registro.razonSocial,
+        cuit: registro.cuit,
+        condicionesComerciales: registro.condicionesComerciales || undefined,
+      });
+      const errores = await validate(dto);
+      if (errores.length > 0) {
+        const mensaje = errores.flatMap((e) => Object.values(e.constraints || {})).join("; ");
+        detalle.push({ fila: numeroFila, ok: false, mensaje });
+        continue;
+      }
+      try {
+        await this.prisma.cliente.create({
+          data: { razonSocial: dto.razonSocial, cuit: dto.cuit, condicionesComerciales: dto.condicionesComerciales || null },
+        });
+        creados++;
+        detalle.push({ fila: numeroFila, ok: true, mensaje: "Creado correctamente." });
+      } catch (error) {
+        detalle.push({ fila: numeroFila, ok: false, mensaje: error instanceof Error ? error.message : "Error desconocido al crear." });
+      }
+    }
+    return { total: filas.length, creados, rechazados: filas.length - creados, detalle };
   }
 
   @Get(":id")
