@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { api } from "../api/client";
 import { useAsyncAction } from "../hooks/useAsyncAction";
@@ -15,7 +15,7 @@ function fmtMoney(n: number) {
 // tiene su propio useAsyncAction — mismo guard de doble clic por ref (no por estado) que ya usan
 // ViajeForm.tsx/Usuarios.tsx, acá aplicado por fila para que avanzar una fila no bloquee ni
 // contamine el busy/error de las demás.
-export default function FilaViaje({ viaje, onEstadoActualizado }: { viaje: any; onEstadoActualizado: (id: string, nuevoEstado: string) => void }) {
+function FilaViaje({ viaje, onEstadoActualizado }: { viaje: any; onEstadoActualizado: (id: string, nuevoEstado: string) => void }) {
   const location = useLocation();
   const { usuario } = useAuth();
   const confirm = useConfirm();
@@ -146,3 +146,10 @@ export default function FilaViaje({ viaje, onEstadoActualizado }: { viaje: any; 
     </tr>
   );
 }
+
+// H-9 (AUDITORIA_VIAJES2.0_RC1.md, H-9): memo evita que actualizar una fila re-renderice las
+// demás — solo tiene efecto real porque actualizarEstadoFila (Viajes.tsx) está envuelta en
+// useCallback (referencia estable) y viaje conserva su referencia para las filas no tocadas
+// (Viajes.tsx: actualizarEstadoFila hace .map() devolviendo la misma referencia salvo para la
+// fila cuyo id coincide).
+export default memo(FilaViaje);

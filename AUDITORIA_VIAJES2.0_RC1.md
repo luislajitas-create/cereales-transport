@@ -342,3 +342,23 @@ Justificación: los 6 bloques publicados son consistentes entre sí y con el bac
 **Builds y tests:** backend sin cambios, 11/11 suites, 82/82 tests verde. Frontend build OK, sin errores TypeScript, 122 módulos (+1 por el archivo nuevo).
 
 **Deuda remanente sin cambios:** H-9 a H-11 (deuda aceptable / mejora futura, sin bloqueantes).
+
+---
+
+## 19. H-9 — Evitar re-renders innecesarios de `FilaViaje` (adenda)
+
+**H-9 (`FilaViaje` sin `React.memo`): cerrado.** Auditoría previa (con evidencia de código, no supuestos) confirmó dos hechos independientes: (1) `actualizarEstadoFila` en `Viajes.tsx` construye el nuevo array con `.map()` devolviendo la **misma referencia** de objeto para toda fila cuyo `id` no coincide — solo la fila modificada recibe un objeto nuevo; (2) `actualizarEstadoFila` estaba declarada como función normal, **sin `useCallback`**, por lo que se recreaba en cada render de `Viajes.tsx` — un `React.memo` aplicado solo a `FilaViaje` no habría tenido ningún efecto real, porque la prop `onEstadoActualizado` habría cambiado de referencia igual en cada render del padre, haciendo fallar la comparación superficial para todas las filas.
+
+**Alternativas evaluadas:** A) solo `React.memo` (sin efecto real, por el punto anterior); B) `React.memo` + `useCallback` (elegida — con ambas props ya estables, la comparación superficial por defecto alcanza); C) comparador personalizado (descartada por innecesaria una vez estabilizadas las dos props, y por ser una abstracción de mantenimiento adicional sin beneficio).
+
+**Implementación:** `FilaViaje` envuelta en `memo()` (`frontend/src/components/FilaViaje.tsx`); `actualizarEstadoFila` envuelta en `useCallback` con deps vacías (`frontend/src/pages/Viajes.tsx`) — usa únicamente la forma funcional del setter de estado, sin cerrar sobre ningún valor del render. Sin comparador custom (innecesario). Sin cambios a la lógica interna de actualización de estado.
+
+**Evidencia de renders (antes/después):** instrumentación temporal (`console.count` en `FilaViaje`, removida antes del commit) validada manualmente en navegador real con backend y frontend locales corriendo, contra un listado de 19 filas y dos viajes descartables creados para este bloque (`CTG-H9-AVANZAR`, `CTG-H9-CANCELAR`, ambos sin tocar viajes de bloques anteriores). Confirmado por el usuario: al cargar, cada fila renderiza una vez; al avanzar `CTG-H9-AVANZAR`, solo esa fila vuelve a renderizar; al cancelar `CTG-H9-CANCELAR`, solo esa fila vuelve a renderizar; ninguna otra fila registró renders adicionales en ninguno de los dos casos.
+
+**Validación funcional:** confirmada manualmente por el usuario — listado sin cambios visuales, Avanzar y Cancelar funcionan igual (badge/botón actualizados, modal con motivo obligatorio), menú ⋮ abre/cierra igual, filtros y búsqueda se conservan, `volverA` se preserva al volver del Detalle, `ADMINISTRADOR` ve las acciones y `LECTURA` no ve Avanzar/menú/"+ Nuevo viaje". Sin cambios de comportamiento observable — solo se redujo la cantidad de renders.
+
+**Regresiones:** no se re-probaron L1–L4.3/H-6/H-7/H-8/RC1.1–1.3 de forma completa — ninguno de esos bloques depende de cuántas veces re-renderiza `FilaViaje`, solo de su comportamiento observable (ya confirmado sin cambios).
+
+**Builds y tests:** backend sin cambios, 11/11 suites, 82/82 tests verde. Frontend build OK, sin errores TypeScript, 122 módulos (sin cambios en la cantidad, mismo árbol de módulos que H-8).
+
+**Deuda remanente sin cambios:** H-10 y H-11 (deuda aceptable / mejora futura, sin bloqueantes).

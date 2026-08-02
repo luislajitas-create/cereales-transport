@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { api } from "../api/client";
 import { useAuth } from "../context/AuthContext";
@@ -52,9 +52,13 @@ export default function Viajes() {
     api.get("/clientes").then((res) => setClientes(res.data));
   }, []);
 
-  function actualizarEstadoFila(id: string, nuevoEstado: string) {
+  // H-9 (AUDITORIA_VIAJES2.0_RC1.md, H-9): useCallback con deps vacías — solo usa el setter de
+  // estado (siempre estable) vía forma funcional, sin cerrar sobre ningún valor del render. Sin
+  // esto, FilaViaje (memo) recibiría una referencia nueva de onEstadoActualizado en cada render
+  // de Viajes y el memo no tendría ningún efecto.
+  const actualizarEstadoFila = useCallback((id: string, nuevoEstado: string) => {
     setViajes((prev) => prev.map((v) => (v.id === id ? { ...v, estado: nuevoEstado } : v)));
-  }
+  }, []);
 
   return (
     <div>
