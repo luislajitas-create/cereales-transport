@@ -3,6 +3,7 @@ import { useSearchParams } from "react-router-dom";
 import { api } from "../api/client";
 import { useConfirm } from "../components/ConfirmDialog";
 import { useAsyncAction } from "../hooks/useAsyncAction";
+import { useAuth } from "../context/AuthContext";
 import FilaLiquidacion from "../components/FilaLiquidacion";
 
 const CATEGORIAS_ADELANTO = ["Seguros", "Transferencia Bancaria", "Efectivo", "Combustible", "Otros"];
@@ -17,6 +18,13 @@ function fmtMoney(n: number) {
 export default function Liquidaciones() {
   const confirm = useConfirm();
   const { busy, error, success, setError, run } = useAsyncAction();
+  // LIQ-3 (AUDITORIA_LIQUIDACIONES.md): mismo criterio que puedeGestionarViajes (Viajes.tsx) —
+  // refleja exactamente los roles que @Roles("LIQUIDACIONES", "ADMINISTRADOR") ya exige en los
+  // 4 endpoints mutantes (create/confirmar/pagar/anular) de liquidaciones.controller.ts. El
+  // backend sigue siendo la única autoridad real; esto solo oculta controles que de todos modos
+  // recibirían 403 (p. ej. GERENCIA, que sí puede ver este listado según Layout.tsx).
+  const { usuario } = useAuth();
+  const puedeGestionarLiquidaciones = usuario?.rol === "LIQUIDACIONES" || usuario?.rol === "ADMINISTRADOR";
   // LIQ-1: filtros y persistencia en la URL (mismo criterio de L3/H-11 en Viajes.tsx). El
   // listado principal de Liquidaciones no tiene filtros propios en la UI (a diferencia de
   // Viajes) — solo page/limit se persisten acá.
@@ -219,6 +227,7 @@ export default function Liquidaciones() {
       {error && <div className="error-banner">{error}</div>}
       {success && <div className="success-banner">{success}</div>}
 
+      {puedeGestionarLiquidaciones && (
       <div className="card">
         <div className="section-title">Nueva liquidación</div>
         <div className="form-grid">
@@ -323,6 +332,7 @@ export default function Liquidaciones() {
           </>
         )}
       </div>
+      )}
 
       <div className="card">
         <div className="section-title">Liquidaciones</div>
@@ -527,9 +537,9 @@ export default function Liquidaciones() {
             <button className="btn secondary" disabled={descargando === `${detalle.id}-pdf`} onClick={() => descargar(detalle.id, detalle.numero, "pdf")}>
               {descargando === `${detalle.id}-pdf` ? "Descargando..." : "Descargar PDF"}
             </button>
-            {detalle.estado === "BORRADOR" && <button className="btn success" disabled={busy} onClick={confirmarLiquidacion}>Confirmar</button>}
-            {detalle.estado === "CONFIRMADA" && <button className="btn success" disabled={busy} onClick={pagarLiquidacion}>Marcar como pagada</button>}
-            {detalle.estado !== "PAGADA" && <button className="btn danger" disabled={busy} onClick={anularLiquidacion}>Anular</button>}
+            {puedeGestionarLiquidaciones && detalle.estado === "BORRADOR" && <button className="btn success" disabled={busy} onClick={confirmarLiquidacion}>Confirmar</button>}
+            {puedeGestionarLiquidaciones && detalle.estado === "CONFIRMADA" && <button className="btn success" disabled={busy} onClick={pagarLiquidacion}>Marcar como pagada</button>}
+            {puedeGestionarLiquidaciones && detalle.estado !== "PAGADA" && <button className="btn danger" disabled={busy} onClick={anularLiquidacion}>Anular</button>}
           </div>
         </div>
       )}

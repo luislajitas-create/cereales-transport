@@ -76,3 +76,27 @@ Registro de bloques de deuda técnica y mejoras arquitectónicas del módulo Liq
 **Builds y tests:** backend sin cambios, 13/13 suites, 97/97 tests verde. Frontend build OK, sin errores TypeScript, 123 módulos (+1 por el archivo nuevo).
 
 **Deuda remanente sin cambios (backlog):** falta de gating de rol en la UI, N+1 evitable en `pagar()`/`anular()`, `CATEGORIAS_ADELANTO` duplicado, Detalle/Formulario/Confirmaciones/Exports sin extraer (fuera de alcance explícito de LIQ-2).
+
+---
+
+## LIQ-3 — Gating de rol en la UI de Liquidaciones
+
+**Objetivo:** ocultar en `Liquidaciones.tsx` los controles que el backend igual rechazaría por rol, replicando el mismo criterio ya aplicado en Viajes 2.0 (L4.3), sin tocar backend ni contratos — hardening defensivo de UX, no una corrección de seguridad (el backend ya es la única autoridad real).
+
+**Auditoría previa:**
+1. **Roles exactos confirmados** (releído `liquidaciones.controller.ts`): los 4 endpoints mutantes (`create`, `confirmar`, `pagar`, `anular`) exigen exactamente `@Roles("LIQUIDACIONES", "ADMINISTRADOR")` — mismos roles para los cuatro.
+2. **Controles a gatear:** el card completo "Nueva liquidación" (formulario + candidatos + botón "Crear liquidación (borrador)"), y en el Detalle: "Confirmar", "Marcar como pagada", "Anular".
+3. **Patrón replicado:** `usuario?.rol === "X" || usuario?.rol === "Y"` → `puedeGestionarLiquidaciones`, mismo criterio que `puedeGestionarViajes` (`Viajes.tsx`) y `puedeEditar` (`Organizacion.tsx`).
+4. **`useAuth()`** confirmado: expone `{ usuario }` con `usuario.rol: string`, igual que en el resto del sistema.
+
+**Granularidad decidida:** ocultar el card "Nueva liquidación" **completo**, no solo el botón de envío — `Liquidaciones.tsx` es visible también para `GERENCIA` (nav de `Layout.tsx`: `["ADMINISTRADOR", "LIQUIDACIONES", "GERENCIA"]`), que no tiene ninguna razón legítima para buscar candidatos si de todos modos no puede crear la liquidación. Mismo criterio que Viajes oculta el control de creación completo, no solo deshabilita el submit.
+
+**Implementación:** `Liquidaciones.tsx` — import de `useAuth`, constante `puedeGestionarLiquidaciones`; el card "Nueva liquidación" envuelto condicionalmente; los 3 botones de acción del Detalle (`Confirmar`, `Marcar como pagada`, `Anular`) con `puedeGestionarLiquidaciones &&` agregado a su condición existente por estado. Ningún otro cambio.
+
+**Validación:** confirmado con un usuario `GERENCIA` real, tanto por API directa (`POST /liquidaciones` sin rol de gestión → `403 Forbidden`, `GET /liquidaciones` → `200`, confirmando que el backend sigue siendo la autoridad real) como en navegador: `ADMINISTRADOR` ve todo igual que antes; `GERENCIA` no ve el card "Nueva liquidación" ni los botones Confirmar/Marcar como pagada/Anular, pero conserva listado, paginación, Ver, Excel y PDF sin cambios. Confirmado por el usuario.
+
+**Regresiones:** ninguna — cambio puramente de UI condicional, sin tocar backend, contratos, paginación (LIQ-1) ni `FilaLiquidacion` (LIQ-2).
+
+**Builds y tests:** backend sin cambios, 13/13 suites, 97/97 tests verde. Frontend build OK, sin errores TypeScript, 123 módulos (sin cambios en la cantidad).
+
+**Deuda remanente sin cambios (backlog):** N+1 evitable en `pagar()`/`anular()` (loops de `update` idéntico reemplazables por `updateMany` — impacto bajo, acotado al número de viajes de una sola liquidación); `CATEGORIAS_ADELANTO` duplicado entre backend y frontend; Detalle/Formulario/Confirmaciones/Exports sin extraer a subcomponentes.
