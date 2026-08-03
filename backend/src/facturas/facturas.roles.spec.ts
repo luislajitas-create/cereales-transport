@@ -34,9 +34,10 @@ describe("RolesGuard — endpoints reales de Facturas (SEC-UI-1)", () => {
     expect(guard.canActivate(contextoPara(handler, undefined))).toBe(false);
   });
 
-  it.each(ESCRITURA)("Factura.%s rechaza a OPERACIONES/LIQUIDACIONES (roles sin alcance sobre Facturas)", (_nombre, handler) => {
+  it.each(ESCRITURA)("Factura.%s rechaza a OPERACIONES/LIQUIDACIONES/GERENCIA (roles sin alcance sobre Facturas)", (_nombre, handler) => {
     expect(guard.canActivate(contextoPara(handler, "OPERACIONES"))).toBe(false);
     expect(guard.canActivate(contextoPara(handler, "LIQUIDACIONES"))).toBe(false);
+    expect(guard.canActivate(contextoPara(handler, "GERENCIA"))).toBe(false);
   });
 
   it.each(ESCRITURA)("Factura.%s permite a FACTURACION", (_nombre, handler) => {

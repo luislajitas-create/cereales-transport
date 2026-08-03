@@ -124,6 +124,28 @@ export default function Facturas() {
     );
   }
 
+  async function anularCobranza(c: any) {
+    if (!detalle) return;
+    const ok = await confirm({
+      title: "Anular cobranza",
+      message: `¿Anular la cobranza de ${fmtMoney(c.importe)} del ${new Date(c.fecha).toLocaleDateString()}${c.medioPago ? ` (${c.medioPago})` : ""} de la factura ${detalle.numero}? Se recalculará el total cobrado, el saldo y el estado de la factura.`,
+      requireMotivo: true,
+      confirmLabel: "Anular cobranza",
+    });
+    if (!ok.confirmed) return;
+    run(
+      async () => {
+        await api.post(`/facturas/${detalle.id}/cobranzas/${c.id}/anular`, { motivo: ok.motivo });
+        await verDetalle(detalle.id);
+        buscar(pagina, limite);
+      },
+      {
+        successMessage: `Cobranza de ${fmtMoney(c.importe)} anulada.`,
+        errorMessage: "No se pudo anular la cobranza",
+      },
+    );
+  }
+
   async function anularFactura(id: string) {
     if (!detalle) return;
     const ok = await confirm({
@@ -254,10 +276,29 @@ export default function Facturas() {
 
           <div className="section-title">Cobranzas</div>
           <table>
-            <thead><tr><th>Fecha</th><th>Importe</th><th>Medio de pago</th></tr></thead>
+            <thead><tr><th>Fecha</th><th>Importe</th><th>Medio de pago</th><th>Estado</th><th></th></tr></thead>
             <tbody>
               {detalle.cobranzas.map((c: any) => (
-                <tr key={c.id}><td>{new Date(c.fecha).toLocaleDateString()}</td><td>{fmtMoney(c.importe)}</td><td>{c.medioPago || "—"}</td></tr>
+                <tr key={c.id}>
+                  <td>{new Date(c.fecha).toLocaleDateString()}</td>
+                  <td>{fmtMoney(c.importe)}</td>
+                  <td>{c.medioPago || "—"}</td>
+                  <td>
+                    {c.anulada ? (
+                      <span className="badge ANULADO">
+                        Anulada{c.anuladaFecha ? ` (${new Date(c.anuladaFecha).toLocaleDateString()})` : ""}
+                        {c.anuladaMotivo ? ` — ${c.anuladaMotivo}` : ""}
+                      </span>
+                    ) : (
+                      <span className="badge ACTIVO">Vigente</span>
+                    )}
+                  </td>
+                  <td>
+                    {puedeGestionarFacturas && !c.anulada && (
+                      <button className="btn danger" disabled={busy} onClick={() => anularCobranza(c)}>Anular cobranza</button>
+                    )}
+                  </td>
+                </tr>
               ))}
             </tbody>
           </table>
@@ -271,7 +312,7 @@ export default function Facturas() {
             </div>
           )}
 
-          {puedeGestionarFacturas && detalle.cobranzas.length === 0 && detalle.estado !== "ANULADO" && (
+          {puedeGestionarFacturas && detalle.cobranzas.every((c: any) => c.anulada) && detalle.estado !== "ANULADO" && (
             <div className="actions-row"><button className="btn danger" disabled={busy} onClick={() => anularFactura(detalle.id)}>Anular factura</button></div>
           )}
         </div>

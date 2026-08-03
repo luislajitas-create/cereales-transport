@@ -433,15 +433,22 @@ export class FacturasController {
 
       const factura = await tx.factura.findUnique({ where: { id }, include: { cobranzas: true } });
       if (!factura) throw new NotFoundException("Factura no encontrada");
+      // Chequeo explícito por estado de la factura, no solo por el flag de la cobranza: una
+      // factura ANULADA no debe aceptar modificaciones de cobranzas aunque, por algún dato
+      // inconsistente, alguna de sus cobranzas figurase como vigente.
+      if (factura.estado === "ANULADO") {
+        throw new BadRequestException("La factura está anulada; no se pueden modificar sus cobranzas");
+      }
 
       const cobranza = factura.cobranzas.find((c) => c.id === cobranzaId);
       if (!cobranza) throw new NotFoundException("Cobranza no encontrada para esta factura");
       if (cobranza.anulada) throw new BadRequestException("La cobranza ya está anulada");
+      if (!body?.motivo) throw new BadRequestException("Debe indicar un motivo de anulación");
 
       const anuladaFecha = new Date();
       await tx.cobranza.update({
         where: { id: cobranzaId },
-        data: { anulada: true, anuladaMotivo: body.motivo || null, anuladaFecha },
+        data: { anulada: true, anuladaMotivo: body.motivo, anuladaFecha },
       });
       await tx.auditLog.create({
         data: {
@@ -450,7 +457,7 @@ export class FacturasController {
           entidadId: cobranzaId,
           accion: "anular",
           datosAnteriores: { importe: cobranza.importe, fecha: cobranza.fecha, medioPago: cobranza.medioPago },
-          datosNuevos: { anulada: true, motivo: body.motivo || null },
+          datosNuevos: { anulada: true, motivo: body.motivo },
         },
       });
 
