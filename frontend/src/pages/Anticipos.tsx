@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "../api/client";
+import { useAuth } from "../context/AuthContext";
 import { useConfirm } from "../components/ConfirmDialog";
 import { useAsyncAction } from "../hooks/useAsyncAction";
 
@@ -8,6 +9,13 @@ function fmtMoney(n: number) {
 }
 
 export default function Anticipos() {
+  const { usuario } = useAuth();
+  // SEC-UI-1: gating de UI, mismo patrón ya usado en Viajes/Liquidaciones/Transportistas/
+  // Clientes — mapeado exactamente contra @Roles("LIQUIDACIONES","OPERACIONES","ADMINISTRADOR")
+  // de anticipos.controller.ts (create/update/anular, matriz uniforme para toda la pantalla).
+  // findAll no exige rol especifico, por lo que la ruta /anticipos no se envuelve en
+  // ProtectedRoute — LECTURA debe poder seguir consultando el listado.
+  const puedeGestionarAnticipos = usuario?.rol === "LIQUIDACIONES" || usuario?.rol === "OPERACIONES" || usuario?.rol === "ADMINISTRADOR";
   const confirm = useConfirm();
   const { busy, error, success, run } = useAsyncAction();
   const [anticipos, setAnticipos] = useState<any[]>([]);
@@ -75,47 +83,49 @@ export default function Anticipos() {
       {error && <div className="error-banner">{error}</div>}
       {success && <div className="success-banner">{success}</div>}
 
-      <form className="card" onSubmit={crear}>
-        <div className="section-title">Registrar anticipo / gasto</div>
-        <div className="form-grid">
-          <div className="field">
-            <label>Transportista</label>
-            <select value={nuevo.transportistaId} onChange={(e) => setNuevo({ ...nuevo, transportistaId: e.target.value })} required>
-              <option value="">Seleccionar...</option>
-              {transportistas.map((t) => <option key={t.id} value={t.id}>{t.razonSocial}</option>)}
-            </select>
+      {puedeGestionarAnticipos && (
+        <form className="card" onSubmit={crear}>
+          <div className="section-title">Registrar anticipo / gasto</div>
+          <div className="form-grid">
+            <div className="field">
+              <label>Transportista</label>
+              <select value={nuevo.transportistaId} onChange={(e) => setNuevo({ ...nuevo, transportistaId: e.target.value })} required>
+                <option value="">Seleccionar...</option>
+                {transportistas.map((t) => <option key={t.id} value={t.id}>{t.razonSocial}</option>)}
+              </select>
+            </div>
+            <div className="field">
+              <label>Chofer</label>
+              <select value={nuevo.choferId} onChange={(e) => setNuevo({ ...nuevo, choferId: e.target.value })} required disabled={!nuevo.transportistaId}>
+                <option value="">Seleccionar...</option>
+                {choferes.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+              </select>
+            </div>
+            <div className="field">
+              <label>Tipo de gasto</label>
+              <select value={nuevo.tipoGastoId} onChange={(e) => setNuevo({ ...nuevo, tipoGastoId: e.target.value })} required>
+                <option value="">Seleccionar...</option>
+                {tiposGasto.map((t) => <option key={t.id} value={t.id}>{t.nombre}</option>)}
+              </select>
+            </div>
+            <div className="field">
+              <label>Fecha</label>
+              <input type="date" value={nuevo.fecha} onChange={(e) => setNuevo({ ...nuevo, fecha: e.target.value })} required />
+            </div>
+            <div className="field">
+              <label>Importe</label>
+              <input type="number" step="0.01" value={nuevo.importe} onChange={(e) => setNuevo({ ...nuevo, importe: e.target.value })} required />
+            </div>
+            <div className="field">
+              <label>Observaciones</label>
+              <input value={nuevo.observaciones} onChange={(e) => setNuevo({ ...nuevo, observaciones: e.target.value })} />
+            </div>
           </div>
-          <div className="field">
-            <label>Chofer</label>
-            <select value={nuevo.choferId} onChange={(e) => setNuevo({ ...nuevo, choferId: e.target.value })} required disabled={!nuevo.transportistaId}>
-              <option value="">Seleccionar...</option>
-              {choferes.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
-            </select>
+          <div className="actions-row">
+            <button className="btn" type="submit" disabled={busy}>{busy ? "Registrando..." : "Registrar"}</button>
           </div>
-          <div className="field">
-            <label>Tipo de gasto</label>
-            <select value={nuevo.tipoGastoId} onChange={(e) => setNuevo({ ...nuevo, tipoGastoId: e.target.value })} required>
-              <option value="">Seleccionar...</option>
-              {tiposGasto.map((t) => <option key={t.id} value={t.id}>{t.nombre}</option>)}
-            </select>
-          </div>
-          <div className="field">
-            <label>Fecha</label>
-            <input type="date" value={nuevo.fecha} onChange={(e) => setNuevo({ ...nuevo, fecha: e.target.value })} required />
-          </div>
-          <div className="field">
-            <label>Importe</label>
-            <input type="number" step="0.01" value={nuevo.importe} onChange={(e) => setNuevo({ ...nuevo, importe: e.target.value })} required />
-          </div>
-          <div className="field">
-            <label>Observaciones</label>
-            <input value={nuevo.observaciones} onChange={(e) => setNuevo({ ...nuevo, observaciones: e.target.value })} />
-          </div>
-        </div>
-        <div className="actions-row">
-          <button className="btn" type="submit" disabled={busy}>{busy ? "Registrando..." : "Registrar"}</button>
-        </div>
-      </form>
+        </form>
+      )}
 
       <table>
         <thead>
@@ -132,7 +142,7 @@ export default function Anticipos() {
               <td>{a.liquidado ? "Sí" : "No"}</td>
               <td>{a.anulado ? `Sí (${a.anuladoMotivo})` : "No"}</td>
               <td>
-                {!a.liquidado && !a.anulado && (
+                {puedeGestionarAnticipos && !a.liquidado && !a.anulado && (
                   <button className="btn danger" disabled={busy} onClick={() => anular(a)}>Anular</button>
                 )}
               </td>

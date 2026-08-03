@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "../api/client";
+import { useAuth } from "../context/AuthContext";
 import { useConfirm } from "../components/ConfirmDialog";
 import { useAsyncAction } from "../hooks/useAsyncAction";
 
@@ -12,6 +13,13 @@ const CLIENTE_VACIO = { razonSocial: "", cuit: "", condicionesComerciales: "" };
 type Orden = "razonSocial" | "createdAt" | "activo";
 
 export default function Clientes() {
+  const { usuario } = useAuth();
+  // Gating de UI, mismo patrón ya usado en Viajes/Liquidaciones/Transportistas (CRM-2) —
+  // reflejando exactamente los @Roles() de clientes.controller.ts (create/update/remove/
+  // importar exigen OPERACIONES, FACTURACION o ADMINISTRADOR). LECTURA no entra en ese
+  // conjunto: antes de este fix veía y podía intentar alta/edición/baja-reactivación/
+  // importación CSV, recibiendo un 403 del backend en vez de simplemente no ver la acción.
+  const puedeGestionarClientes = usuario?.rol === "OPERACIONES" || usuario?.rol === "FACTURACION" || usuario?.rol === "ADMINISTRADOR";
   const confirm = useConfirm();
   // CRM-1: mismo patrón ya usado en Viajes/Liquidaciones/Facturas para busy/error/success —
   // reemplaza el useState("") de error suelto que tenía esta pantalla, sumando el banner de
@@ -167,54 +175,58 @@ export default function Clientes() {
         </div>
       </div>
 
-      <form className="card" onSubmit={guardar}>
-        <div className="section-title">{editandoId ? "Editar cliente" : "Nuevo cliente"}</div>
-        <div className="form-grid">
-          <div className="field">
-            <label>Razón social</label>
-            <input value={nuevo.razonSocial} onChange={(e) => setNuevo({ ...nuevo, razonSocial: e.target.value })} required />
+      {puedeGestionarClientes && (
+        <form className="card" onSubmit={guardar}>
+          <div className="section-title">{editandoId ? "Editar cliente" : "Nuevo cliente"}</div>
+          <div className="form-grid">
+            <div className="field">
+              <label>Razón social</label>
+              <input value={nuevo.razonSocial} onChange={(e) => setNuevo({ ...nuevo, razonSocial: e.target.value })} required />
+            </div>
+            <div className="field">
+              <label>CUIT</label>
+              <input value={nuevo.cuit} onChange={(e) => setNuevo({ ...nuevo, cuit: e.target.value })} required />
+            </div>
+            <div className="field">
+              <label>Condiciones comerciales</label>
+              <input value={nuevo.condicionesComerciales} onChange={(e) => setNuevo({ ...nuevo, condicionesComerciales: e.target.value })} />
+            </div>
           </div>
-          <div className="field">
-            <label>CUIT</label>
-            <input value={nuevo.cuit} onChange={(e) => setNuevo({ ...nuevo, cuit: e.target.value })} required />
+          <div className="actions-row">
+            <button className="btn" type="submit" disabled={busy}>
+              {busy ? "Guardando..." : editandoId ? "Guardar cambios" : "Agregar"}
+            </button>
+            {editandoId && <button className="btn secondary" type="button" onClick={cancelarEdicion}>Cancelar edición</button>}
           </div>
-          <div className="field">
-            <label>Condiciones comerciales</label>
-            <input value={nuevo.condicionesComerciales} onChange={(e) => setNuevo({ ...nuevo, condicionesComerciales: e.target.value })} />
-          </div>
-        </div>
-        <div className="actions-row">
-          <button className="btn" type="submit" disabled={busy}>
-            {busy ? "Guardando..." : editandoId ? "Guardar cambios" : "Agregar"}
-          </button>
-          {editandoId && <button className="btn secondary" type="button" onClick={cancelarEdicion}>Cancelar edición</button>}
-        </div>
-      </form>
+        </form>
+      )}
 
-      <div className="card">
-        <div className="section-title">Importar desde CSV</div>
-        <p className="muted">Cargá varios clientes a la vez. Descargá la plantilla para saber qué columnas usar.</p>
-        <div className="actions-row">
-          <button className="btn secondary" type="button" onClick={descargarPlantillaImportacion}>Descargar plantilla</button>
-          <input type="file" accept=".csv" onChange={(e) => setArchivoImportar(e.target.files?.[0] || null)} />
-          <button className="btn" type="button" disabled={!archivoImportar || importando} onClick={importarCsv}>
-            {importando ? "Importando..." : "Importar"}
-          </button>
-        </div>
-        {resultadoImportacion && (
-          <div className={resultadoImportacion.rechazados > 0 ? "warning-banner" : "success-banner"}>
-            <strong>{resultadoImportacion.creados} de {resultadoImportacion.total} clientes creados</strong>
-            {resultadoImportacion.rechazados > 0 && ` — ${resultadoImportacion.rechazados} rechazados:`}
-            {resultadoImportacion.rechazados > 0 && (
-              <ul style={{ margin: "0.4rem 0 0", paddingLeft: "1.2rem" }}>
-                {resultadoImportacion.detalle.filter((d) => !d.ok).map((d) => (
-                  <li key={d.fila}>Fila {d.fila}: {d.mensaje}</li>
-                ))}
-              </ul>
-            )}
+      {puedeGestionarClientes && (
+        <div className="card">
+          <div className="section-title">Importar desde CSV</div>
+          <p className="muted">Cargá varios clientes a la vez. Descargá la plantilla para saber qué columnas usar.</p>
+          <div className="actions-row">
+            <button className="btn secondary" type="button" onClick={descargarPlantillaImportacion}>Descargar plantilla</button>
+            <input type="file" accept=".csv" onChange={(e) => setArchivoImportar(e.target.files?.[0] || null)} />
+            <button className="btn" type="button" disabled={!archivoImportar || importando} onClick={importarCsv}>
+              {importando ? "Importando..." : "Importar"}
+            </button>
           </div>
-        )}
-      </div>
+          {resultadoImportacion && (
+            <div className={resultadoImportacion.rechazados > 0 ? "warning-banner" : "success-banner"}>
+              <strong>{resultadoImportacion.creados} de {resultadoImportacion.total} clientes creados</strong>
+              {resultadoImportacion.rechazados > 0 && ` — ${resultadoImportacion.rechazados} rechazados:`}
+              {resultadoImportacion.rechazados > 0 && (
+                <ul style={{ margin: "0.4rem 0 0", paddingLeft: "1.2rem" }}>
+                  {resultadoImportacion.detalle.filter((d) => !d.ok).map((d) => (
+                    <li key={d.fila}>Fila {d.fila}: {d.mensaje}</li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="filters">
         <div className="field">
@@ -247,10 +259,12 @@ export default function Clientes() {
               <td><span className={`badge ${c.activo ? "ACTIVO" : "INACTIVO"}`}>{c.activo ? "Activo" : "Inactivo"}</span></td>
               <td>{new Date(c.createdAt).toLocaleDateString()}</td>
               <td>
-                <button className="btn secondary" onClick={() => iniciarEdicion(c)}>Editar</button>{" "}
-                <button className="btn secondary" onClick={() => alternarActivo(c)} disabled={busy}>
-                  {c.activo ? "Desactivar" : "Reactivar"}
-                </button>{" "}
+                {puedeGestionarClientes && <button className="btn secondary" onClick={() => iniciarEdicion(c)}>Editar</button>}{" "}
+                {puedeGestionarClientes && (
+                  <button className="btn secondary" onClick={() => alternarActivo(c)} disabled={busy}>
+                    {c.activo ? "Desactivar" : "Reactivar"}
+                  </button>
+                )}{" "}
                 <button className="btn secondary" onClick={() => verCuentaCorriente(c.id)}>Cuenta corriente</button>
               </td>
             </tr>

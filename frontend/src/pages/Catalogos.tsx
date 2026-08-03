@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { api } from "../api/client";
+import { useAuth } from "../context/AuthContext";
 
 const TABS = [
   { key: "cereales", label: "Cereales", endpoint: "/cereales", fields: [{ name: "nombre", label: "Nombre" }] },
@@ -33,6 +34,14 @@ const TABS = [
 ];
 
 export default function Catalogos() {
+  const { usuario } = useAuth();
+  // SEC-UI-1: gating de UI mapeado exactamente contra simples.controller.ts. Cereales/
+  // Ubicaciones/Productores exigen OPERACIONES/ADMINISTRADOR; Tipos de gasto admite además
+  // LIQUIDACIONES (asimetría real del backend, no unificada en un solo flag). findAll no exige
+  // rol especifico en ninguno de los cuatro, por lo que /catalogos no se envuelve en
+  // ProtectedRoute — LECTURA debe poder seguir consultando las cuatro pestañas.
+  const puedeGestionarCatalogosBase = usuario?.rol === "OPERACIONES" || usuario?.rol === "ADMINISTRADOR";
+  const puedeGestionarTiposGasto = puedeGestionarCatalogosBase || usuario?.rol === "LIQUIDACIONES";
   // Permite abrir una pestaña específica por URL (?tab=ubicaciones) — usado por el Asistente de
   // Puesta en Marcha (Dashboard.tsx) para llevar directo a la pestaña correcta en vez de
   // depender de que el usuario la busque a mano. Sin parámetro, o con uno que no coincide con
@@ -61,6 +70,8 @@ export default function Catalogos() {
     }
   }
 
+  const puedeCrearEnTabActual = tab.key === "tipos-gasto" ? puedeGestionarTiposGasto : puedeGestionarCatalogosBase;
+
   return (
     <div>
       <div className="page-header"><h1>Catálogos</h1></div>
@@ -78,25 +89,27 @@ export default function Catalogos() {
         ))}
       </div>
 
-      <form className="card" onSubmit={crear}>
-        <div className="section-title">Nuevo: {tab.label}</div>
-        <div className="form-grid">
-          {tab.fields.map((f: any) => (
-            <div className="field" key={f.name}>
-              <label>{f.label}</label>
-              {f.type === "select" ? (
-                <select value={nuevo[f.name] || ""} onChange={(e) => setNuevo({ ...nuevo, [f.name]: e.target.value })} required>
-                  <option value="">Seleccionar...</option>
-                  {f.options.map((o: string) => <option key={o} value={o}>{o}</option>)}
-                </select>
-              ) : (
-                <input value={nuevo[f.name] || ""} onChange={(e) => setNuevo({ ...nuevo, [f.name]: e.target.value })} required={f.name === "nombre"} />
-              )}
-            </div>
-          ))}
-        </div>
-        <div className="actions-row"><button className="btn" type="submit">Agregar</button></div>
-      </form>
+      {puedeCrearEnTabActual && (
+        <form className="card" onSubmit={crear}>
+          <div className="section-title">Nuevo: {tab.label}</div>
+          <div className="form-grid">
+            {tab.fields.map((f: any) => (
+              <div className="field" key={f.name}>
+                <label>{f.label}</label>
+                {f.type === "select" ? (
+                  <select value={nuevo[f.name] || ""} onChange={(e) => setNuevo({ ...nuevo, [f.name]: e.target.value })} required>
+                    <option value="">Seleccionar...</option>
+                    {f.options.map((o: string) => <option key={o} value={o}>{o}</option>)}
+                  </select>
+                ) : (
+                  <input value={nuevo[f.name] || ""} onChange={(e) => setNuevo({ ...nuevo, [f.name]: e.target.value })} required={f.name === "nombre"} />
+                )}
+              </div>
+            ))}
+          </div>
+          <div className="actions-row"><button className="btn" type="submit">Agregar</button></div>
+        </form>
+      )}
 
       <table>
         <thead>
