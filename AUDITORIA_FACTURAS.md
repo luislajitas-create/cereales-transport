@@ -119,3 +119,81 @@ Base preexistente antes de FAC-3: **255 tests / 23 suites**. 255 + 19 = **274 te
 **Builds y tests finales:** backend `npm run build` OK; `npx jest --clearCache && npx jest` → **26/26 suites, 274/274 tests**; frontend `tsc -b` (typecheck) y `vite build` OK.
 
 **Deuda remanente identificada, fuera de alcance de FAC-3 (backlog):** falta recuperación por email/notificaciones sobre la anulación (explícitamente pospuesto por el usuario); `npm run start:dev` no carga `.env` automáticamente (no hay `dotenv`/`ConfigModule` antes de `validarEntorno()` en `main.ts`) — hay que exportar las variables al shell antes de levantar el backend local.
+
+---
+
+## FAC-4 — Auditoría del registro de cobranzas + fricciones de UX detectadas en su validación
+
+**Brecha original:** durante la auditoría de FAC-3 se confirmó que `anularCobranza()` genera `AuditLog` correctamente, pero `registrarCobranza()` — el evento financiero más frecuente del módulo (toda cobranza que entra) — no generaba ninguno. No había forma de determinar quién registró un pago, sobre qué factura, cuándo, por qué importe o mediante qué medio. Tampoco existía ningún test para este endpoint (`registrarCobranza` no tenía spec dedicado antes de FAC-4).
+
+### Atomicidad
+
+La creación de la `Cobranza` y su `AuditLog` viven en la misma transacción (`this.prisma.$transaction(async (tx) => {...})`), igual que en `anularCobranza`: `tx.cobranza.create()` → `tx.auditLog.create()` → `tx.factura.update()`, en ese orden, dentro del mismo callback.
+
+**Aclaración honesta:** los tests que simulan un fallo de `auditLog.create()` (mock rechazado) **no tienen una base de datos real detrás** — no demuestran un rollback físico en PostgreSQL. Lo que sí prueban, a nivel de código: la excepción se propaga fuera del callback de `$transaction`, y `factura.update()` (que corre después en el código) nunca llega a ejecutarse dentro de esa misma invocación. La atomicidad real — que `cobranza.create()` también se revierta en la base si algo posterior falla — es una garantía de las transacciones interactivas de Prisma/PostgreSQL, no algo que estos mocks reproduzcan ni que el equipo deba afirmar que reproducen. Este matiz quedó documentado como comentario dentro de los propios tests (`facturas.controller.registrar-cobranza.spec.ts`).
+
+### Usuario obligatorio (nunca `usuarioId: null` en Cobranza)
+
+`JwtAuthGuard` ya garantiza un usuario autenticado en cualquier request, pero como defensa en profundidad se agregó `asegurarUsuarioIdentificable(user)` en `facturas.controller.ts` — lanza `UnauthorizedException` si `!user?.id`, ejecutado **antes** de abrir la transacción en `registrarCobranza` **y** en `anularCobranza` (el mismo control aplica a ambos endpoints de Cobranza, no solo al nuevo). `usuarioId: user?.id || null` pasó a `usuarioId: user.id` en los dos, ya que el guard garantiza que nunca falta. No es una regresión sobre el comportamiento validado de FAC-3: el caso que ahora rechaza (`user` vacío) nunca era alcanzable en producción bajo `JwtAuthGuard`, solo endurece un camino teórico. Cubierto con 4 tests (2 por endpoint: `user` `undefined` y objeto sin `id`).
+
+### Datos anteriores/posteriores
+
+Cada `AuditLog` de `registrarCobranza` (`accion: "crear"`) registra:
+- `datosAnteriores`: `facturaEstado`, `totalCobradoVigente` y `saldo` **antes** de la nueva cobranza.
+- `datosNuevos`: `facturaId`, `clienteId` (disponible gratis desde `factura`, ya cargada por `findUnique`, sin consulta adicional), `importe`, `fecha`, `medioPago`, `observacion` (solo si existe — nunca la clave con valor vacío), `facturaEstado`, `totalCobradoVigente` y `saldo` **después**.
+- `entidadId` usa el id real devuelto por `tx.cobranza.create()`, nunca un valor supuesto.
+
+Verificado con reversiones reales: COBRADO_TOTAL→COBRADO_PARCIAL/FACTURADO y COBRADO_PARCIAL→FACTURADO, más los casos de pago parcial y pago que completa la factura.
+
+### Inventario y sanitización de campos sensibles
+
+Se recorrieron los **30 call-sites reales** de `auditLog.create()` en el backend (se excluyó `_combustibles.disabled/` por no estar registrado en `AppModule` — código muerto, no corre). Ningún módulo activo guarda `password`, `passwordHash`, `token`, `tokenHash` ni enlaces de recuperación completos en `datosAnteriores`/`datosNuevos`; los tokens reales viven siempre en `PasswordResetToken`/`InvitacionUsuario` como `tokenHash`, nunca copiados a un `AuditLog`. Dos casos con `usuarioId: null` ya existían, documentados y ajenos a Cobranza (`auth.service.ts`, `pago-consolidado.service.ts`): operaciones cross-organización donde la FK compuesta `[usuarioId, organizacionId]` no puede apuntar a un usuario de otra organización — el "quién" real se preserva como dato plano (`actorId`) dentro del JSON.
+
+Como defensa en profundidad (no porque el inventario haya encontrado algo hoy), `AuditoriaAdministrativa.tsx` sanitiza en el único punto de salida hacia el administrador: `PATRON_CLAVE_SENSIBLE` (`password|contrase|hash|token|secret|clave|authorization|cookie|api[_-]?key`) reemplaza por `[oculto]` el valor de cualquier clave que matchee, sin importar qué módulo la haya escrito, presente o futuro.
+
+### Medio de pago: obligatorio, atajos y opción "Otro"
+
+**Auditoría de valores reales** (schema, seed, tests, datos locales): `Cobranza.medioPago` era `String?`, texto libre puro, sin enum en ningún lado del sistema. El seed no crea ninguna `Cobranza`. Los únicos valores con evidencia real (consulta `groupBy` sobre la base de desarrollo) fueron `TRANSFERENCIA`, `EFECTIVO` y una variante no normalizada `Transferencia` (cargada a mano en validaciones manuales previas).
+
+**Primer intento (corregido por el usuario):** se restringió el DTO con `@IsIn(["TRANSFERENCIA","EFECTIVO"])`. El usuario señaló correctamente que eso convertía una mejora de UX en una restricción comercial nueva no solicitada — nada en el negocio dice que esos son los *únicos* medios aceptables.
+
+**Diseño final:**
+- `medioPago` es **obligatorio** (antes opcional) y ya **no tiene lista cerrada**: `@IsNotEmpty()` + `@MaxLength(60)` + normalización por `trim()` (`@Transform`, mismo helper `recortar` que `UpdateOrganizacionDto`) — cualquier descripción real no vacía es válida.
+- Frontend (`Facturas.tsx`): select con `TRANSFERENCIA`/`EFECTIVO` como atajos rápidos + opción **"Otro"**, que despliega un input obligatorio (`maxLength=60`, mismo límite que el backend). El valor enviado y auditado (`medioPagoAEnviar`) es siempre la descripción tipeada — **nunca el literal `"OTRO"`**.
+- El botón "Registrar cobranza" queda deshabilitado mientras no haya un medio confirmado (sin selección, o "Otro" con el campo todavía vacío) — nunca se registra una cobranza sin que el usuario confirme el medio.
+- Tras un registro exitoso se resetean tanto el select como el campo de descripción personalizada.
+- Cobranzas históricas con valores previos, no normalizados o nulos no se tocan ni se re-validan: la celda de solo lectura sigue imprimiendo el string tal cual.
+
+### Opciones dinámicas de Auditoría Administrativa
+
+Los filtros de texto libre "Entidad"/"Acción" (que quedaban obsoletos en cuanto alguien tipeaba un valor que ya no existía) se reemplazaron por selects poblados desde `GET /organizacion/auditoria/opciones` (nuevo, `@Roles("ADMINISTRADOR")`): usa `auditLog.groupBy({by:["entidad"]})` / `groupBy({by:["accion"]})`, ordena alfabéticamente y no depende de ninguna lista manual — cualquier `entidad`/`accion` que un módulo futuro registre aparece sola. Cada select agrega la opción **"Todas"** (`value=""`), mapeando exactamente al mismo comportamiento de "sin filtro" que ya tenía el input de texto. Filtros, paginación y contrato con el backend quedaron intactos.
+
+Además, la tabla de resultados muestra ahora **"Antes"** (`datosAnteriores`) y **"Después"** (`datosNuevos`) como columnas separadas — la versión anterior usaba `datosNuevos || datosAnteriores`, que ocultaba uno de los dos estados cuando ambos existían.
+
+### Roles y aislamiento multiempresa
+
+- `GET /organizacion/auditoria/opciones`: `@Roles("ADMINISTRADOR")`, verificado con `RolesGuard` real sobre `GERENCIA`/`OPERACIONES`/`LIQUIDACIONES`/`FACTURACION`/`LECTURA`/sin usuario (todos rechazados) y `ADMINISTRADOR` (permitido).
+- Aislamiento: `groupBy` es uno de los métodos cubiertos por la extensión de Prisma de Bloque 8.1.d (inyecta `organizacionId` automáticamente) — a diferencia de auditorías anteriores de este bloque, acá se probó con **datos reales de dos organizaciones distintas** (no solo declarado): nueva sección G en `organizacion-prisma.client.spec.ts`, contra la base local real, que crea dos `Organizacion` + `AuditLog` temporales, confirma que `groupBy` de una organización nunca incluye la entidad/acción exclusiva de la otra, y limpia sus propios datos en `afterAll` (verificado sin residuos tras la corrida).
+
+### Pruebas — reconciliación completa (274 → 317, +43 a lo largo de todo FAC-4)
+
+| Archivo | Tests | Contenido |
+|---|---|---|
+| `dto/registrar-cobranza.dto.spec.ts` (nuevo) | 14 | válido completo, importe cero/negativo, fecha inválida, sin fecha/importe/medioPago, TRANSFERENCIA/EFECTIVO aceptados, medioPago ausente/vacío/solo-espacios rechazado, medio personalizado aceptado, trim sin rechazar, longitud excesiva rechazada, longitud límite aceptada |
+| `facturas.controller.registrar-cobranza.spec.ts` (nuevo) | 17 | registro exitoso (1 cobranza + 1 auditoría), ID real de `cobranza.create()`, contenido completo de la auditoría, omisión de `observacion`, estados/totales/saldos anterior-posterior, pago parcial, pago que completa la factura, factura inexistente, factura de otra organización, factura anulada, importe que supera el saldo, sin auditoría duplicada, fallo simulado de `auditLog.create` (con la aclaración honesta sobre qué prueba y qué no), guard de usuario no identificable (2 variantes), auditoría con medio personalizado exacto (nunca "OTRO"), guard defensivo de medioPago vacío |
+| `facturas.controller.cobranzas-anular.spec.ts` (existente, ajustado) | +2 | guard de usuario no identificable aplicado también a `anularCobranza` (2 variantes) |
+| `organizacion.roles.spec.ts` (nuevo) | 4 | matriz de roles para `auditoriaOpciones` |
+| `organizacion.controller.auditoria-opciones.spec.ts` (nuevo) | 4 | orden alfabético, delegación sin filtro manual, ausencia de duplicados, listas vacías |
+| `organizacion-prisma.client.spec.ts` (existente, ajustado) | +2 | aislamiento real de `groupBy` entre dos organizaciones (sección G, DB local, con limpieza propia) |
+
+Base preexistente antes de FAC-4 (cierre de FAC-3): **274 tests / 26 suites**. 274 + 43 = **317 tests / 30 suites**, confirmado por `npx jest --clearCache && npx jest`.
+
+### Validación funcional (navegador real)
+
+Aprobada por el usuario en tres rondas sucesivas, cubriendo: registro de cobranza con auditoría completa (factura `FC-RC13-0001`, pago parcial + total); columnas "Antes"/"Después" mostrando estado/total cobrado/saldo anterior y posterior con usuario identificado; selectores de Entidad/Acción con "Todas" y filtrado real por `crear`/`Cobranza`; medio de pago obligatorio con `TRANSFERENCIA`/`EFECTIVO`/"Otro" y descripción personalizada; reset del selector tras un registro exitoso; auditoría mostrando siempre el medio confirmado, nunca el literal `"OTRO"`. Sin regresiones sobre `anularCobranza`/FAC-3 (recálculo de saldo/estado tras anular verificado en la misma sesión).
+
+**Regresiones:** ninguna esperada — `create()`, `anular()` (factura), `anularCobranza()` no cambiaron su lógica de negocio; suite completa (317/317) y build de ambos lados verdes.
+
+**Builds y tests finales:** backend `npm run build` OK; `npx jest --clearCache && npx jest` → **30/30 suites, 317/317 tests**; frontend `tsc -b` (typecheck) y `vite build` OK.
+
+**Deuda remanente identificada, fuera de alcance de FAC-4 (backlog):** recuperación por email/notificaciones sobre el registro de cobranzas (explícitamente pospuesto); `npm run start:dev` sigue sin cargar `.env` automáticamente (mismo hallazgo que FAC-3, todavía sin resolver — bloque técnico separado).

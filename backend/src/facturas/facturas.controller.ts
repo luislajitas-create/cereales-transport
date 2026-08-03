@@ -1,5 +1,6 @@
 import {
-  Body, Controller, Get, Inject, Param, Post, Query, Res, UseGuards, BadRequestException, ConflictException, NotFoundException,
+  Body, Controller, Get, Inject, Param, Post, Query, Res, UseGuards,
+  BadRequestException, ConflictException, NotFoundException, UnauthorizedException,
 } from "@nestjs/common";
 import { Response } from "express";
 import * as ExcelJS from "exceljs";
@@ -24,6 +25,16 @@ function calcularEstadoFactura(importeFactura: number, totalCobradoVigente: numb
 
 function fmtMoney(n: number) {
   return new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 0 }).format(n || 0);
+}
+
+// FAC-4 (control de seguridad post-auditoría): JwtAuthGuard ya garantiza que toda request
+// llegue con un usuario autenticado — este guard es defensa en profundidad, no la ruta normal.
+// Sin esto, un `user` inesperadamente vacío escribiría silenciosamente `usuarioId: null` en el
+// AuditLog de una Cobranza, perdiendo la trazabilidad de "quién" que exige este módulo.
+function asegurarUsuarioIdentificable(user: any): void {
+  if (!user?.id) {
+    throw new UnauthorizedException("No se pudo identificar al usuario autenticado; operación cancelada.");
+  }
 }
 
 const includeFactura = {
@@ -368,13 +379,19 @@ export class FacturasController {
 
   @Roles("FACTURACION", "ADMINISTRADOR")
   @Post(":id/cobranzas")
-  async registrarCobranza(@Param("id") id: string, @Body() body: RegistrarCobranzaDto) {
+  async registrarCobranza(@Param("id") id: string, @Body() body: RegistrarCobranzaDto, @CurrentUser() user: any) {
+    asegurarUsuarioIdentificable(user);
     if (!body.fecha || body.importe === undefined) {
       throw new BadRequestException("fecha e importe son obligatorios");
     }
+    // Defensa en profundidad detrás del ValidationPipe global (mismo criterio que el motivo de
+    // anularCobranza): medioPago es obligatorio y no vacío desde este bloque.
+    if (!body.medioPago?.trim()) {
+      throw new BadRequestException("Debe indicar el medio de pago");
+    }
     const importeNuevo = Number(body.importe);
     const fechaNueva = new Date(body.fecha);
-    const medioPagoNuevo = body.medioPago || null;
+    const medioPagoNuevo = body.medioPago;
 
     return this.prisma.$transaction(async (tx) => {
       // Bloquea la fila de la factura durante toda la transacción para que dos cobranzas
@@ -405,7 +422,7 @@ export class FacturasController {
         );
       }
 
-      await tx.cobranza.create({
+      const creada = await tx.cobranza.create({
         data: {
           facturaId: id,
           fecha: fechaNueva,
@@ -414,7 +431,40 @@ export class FacturasController {
           observacion: body.observacion || null,
         },
       });
-      const nuevoEstado = calcularEstadoFactura(factura.importe, totalCobradoVigente + importeNuevo);
+
+      const totalCobradoPosterior = totalCobradoVigente + importeNuevo;
+      const nuevoEstado = calcularEstadoFactura(factura.importe, totalCobradoPosterior);
+
+      // FAC-4: mismo criterio que anularCobranza — la creación de la cobranza y su AuditLog
+      // viven en la misma transacción, así que si auditLog.create() falla, Prisma revierte todo
+      // (ni la cobranza ni el nuevo estado de la factura quedan persistidos). entidadId usa el
+      // id real devuelto por cobranza.create(), no un valor supuesto. clienteId sale gratis de
+      // `factura` (ya está en el resultado de findUnique, sin consulta adicional).
+      await tx.auditLog.create({
+        data: {
+          usuarioId: user.id,
+          entidad: "Cobranza",
+          entidadId: creada.id,
+          accion: "crear",
+          datosAnteriores: {
+            facturaEstado: factura.estado,
+            totalCobradoVigente,
+            saldo: factura.importe - totalCobradoVigente,
+          },
+          datosNuevos: {
+            facturaId: id,
+            clienteId: factura.clienteId,
+            importe: importeNuevo,
+            fecha: fechaNueva,
+            medioPago: medioPagoNuevo,
+            ...(body.observacion ? { observacion: body.observacion } : {}),
+            facturaEstado: nuevoEstado,
+            totalCobradoVigente: totalCobradoPosterior,
+            saldo: factura.importe - totalCobradoPosterior,
+          },
+        },
+      });
+
       await tx.factura.update({ where: { id }, data: { estado: nuevoEstado } });
       return tx.factura.findUnique({ where: { id }, include: includeFactura });
     });
@@ -428,6 +478,7 @@ export class FacturasController {
     @Body() body: AnularCobranzaDto,
     @CurrentUser() user: any,
   ) {
+    asegurarUsuarioIdentificable(user);
     return this.prisma.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT id FROM "Factura" WHERE id = ${id} FOR UPDATE`;
 
@@ -452,7 +503,7 @@ export class FacturasController {
       });
       await tx.auditLog.create({
         data: {
-          usuarioId: user?.id || null,
+          usuarioId: user.id,
           entidad: "Cobranza",
           entidadId: cobranzaId,
           accion: "anular",

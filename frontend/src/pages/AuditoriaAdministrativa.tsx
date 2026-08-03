@@ -5,6 +5,34 @@ import { useAuth } from "../context/AuthContext";
 const FILTROS_VACIOS = { usuarioId: "", accion: "", entidad: "", entidadId: "", fechaDesde: "", fechaHasta: "" };
 const LIMITES = [10, 20, 50, 100];
 
+// FAC-4 (control de seguridad post-auditoría): lista central de patrones de clave que nunca
+// deben renderizarse en claro. Un inventario manual de los auditLog.create() del backend (hecho
+// en la revisión de FAC-4) no encontró ninguno de estos campos hoy, pero esta pantalla renderiza
+// JSON arbitrario de cualquier módulo presente o futuro sin controlar lo que cada uno decide
+// guardar — la sanitización vive acá, en el único punto de salida hacia el administrador.
+const PATRON_CLAVE_SENSIBLE = /password|contrase|hash|token|secret|clave|authorization|cookie|api[_-]?key/i;
+
+// Resumen genérico de un objeto datosAnteriores/datosNuevos — no es específico de ningún
+// entidad/accion, funciona igual para cualquier evento de auditoría presente o futuro.
+function formatearValorDetalle(valor: unknown): string {
+  if (valor === null || valor === undefined) return "—";
+  if (typeof valor === "string" && /^\d{4}-\d{2}-\d{2}T/.test(valor)) {
+    const fecha = new Date(valor);
+    if (!isNaN(fecha.getTime())) return fecha.toLocaleDateString();
+  }
+  if (typeof valor === "object") return JSON.stringify(valor);
+  return String(valor);
+}
+
+function resumenDetalle(datos: unknown): string {
+  if (!datos || typeof datos !== "object") return "—";
+  const entradas = Object.entries(datos as Record<string, unknown>);
+  if (entradas.length === 0) return "—";
+  return entradas
+    .map(([clave, valor]) => `${clave}: ${PATRON_CLAVE_SENSIBLE.test(clave) ? "[oculto]" : formatearValorDetalle(valor)}`)
+    .join(" · ");
+}
+
 export default function AuditoriaAdministrativa() {
   const { usuario } = useAuth();
 
@@ -15,6 +43,10 @@ export default function AuditoriaAdministrativa() {
   const [total, setTotal] = useState(0);
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState("");
+  // FAC-4: reemplaza los filtros de texto libre de Entidad/Acción — listas reales, derivadas de
+  // GET /organizacion/auditoria/opciones (ADMINISTRADOR, aisladas por organización), nunca una
+  // lista manual que quede obsoleta.
+  const [opciones, setOpciones] = useState<{ entidades: string[]; acciones: string[] }>({ entidades: [], acciones: [] });
 
   function buscar(paginaNueva: number, limiteNuevo: number, filtrosActuales: typeof FILTROS_VACIOS) {
     setCargando(true);
@@ -46,7 +78,10 @@ export default function AuditoriaAdministrativa() {
     // GET /organizacion/auditoria no está restringido por rol de forma distinta a las demás
     // pantallas administrativas — mismo criterio que Usuarios.tsx: la pantalla es exclusiva de
     // ADMINISTRADOR, así que ni siquiera se consulta el backend para otro rol.
-    if (usuario?.rol === "ADMINISTRADOR") buscar(1, limite, FILTROS_VACIOS);
+    if (usuario?.rol === "ADMINISTRADOR") {
+      buscar(1, limite, FILTROS_VACIOS);
+      api.get("/organizacion/auditoria/opciones").then((res) => setOpciones(res.data));
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [usuario]);
 
@@ -80,11 +115,17 @@ export default function AuditoriaAdministrativa() {
         </div>
         <div className="field">
           <label>Acción</label>
-          <input value={filtros.accion} onChange={(e) => setFiltros({ ...filtros, accion: e.target.value })} />
+          <select value={filtros.accion} onChange={(e) => setFiltros({ ...filtros, accion: e.target.value })}>
+            <option value="">Todas</option>
+            {opciones.acciones.map((a) => <option key={a} value={a}>{a}</option>)}
+          </select>
         </div>
         <div className="field">
           <label>Entidad</label>
-          <input value={filtros.entidad} onChange={(e) => setFiltros({ ...filtros, entidad: e.target.value })} />
+          <select value={filtros.entidad} onChange={(e) => setFiltros({ ...filtros, entidad: e.target.value })}>
+            <option value="">Todas</option>
+            {opciones.entidades.map((en) => <option key={en} value={en}>{en}</option>)}
+          </select>
         </div>
         <div className="field">
           <label>Entidad ID</label>
@@ -119,6 +160,8 @@ export default function AuditoriaAdministrativa() {
                   <th>Acción</th>
                   <th>Entidad</th>
                   <th>Entidad ID</th>
+                  <th>Antes</th>
+                  <th>Después</th>
                 </tr>
               </thead>
               <tbody>
@@ -131,6 +174,8 @@ export default function AuditoriaAdministrativa() {
                     <td>{d.accion}</td>
                     <td>{d.entidad}</td>
                     <td>{d.entidadId}</td>
+                    <td>{resumenDetalle(d.datosAnteriores)}</td>
+                    <td>{resumenDetalle(d.datosNuevos)}</td>
                   </tr>
                 ))}
               </tbody>

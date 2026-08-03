@@ -10,6 +10,15 @@ import FilaFactura from "../components/FilaFactura";
 // Liquidaciones.tsx (LIQ-1).
 const LIMITES = [10, 20, 50, 100];
 
+// FAC-4 (ajuste post-revisión): TRANSFERENCIA/EFECTIVO son atajos rápidos respaldados por uso
+// real — no la lista completa de medios válidos (el backend ya no restringe con @IsIn, ver
+// registrar-cobranza.dto.ts). "Otro" habilita una descripción libre; medioPago nunca se envía
+// literalmente como "OTRO" — ver medioPagoAEnviar más abajo. Cobranzas históricas con un valor
+// previo/no normalizado siguen mostrándose igual (la celda de la tabla no valida nada).
+const MEDIOS_PAGO_RAPIDOS = ["TRANSFERENCIA", "EFECTIVO"];
+const MEDIO_PAGO_OTRO = "OTRO";
+const MEDIO_PAGO_OTRO_LONGITUD_MAXIMA = 60; // mismo límite que MEDIO_PAGO_LONGITUD_MAXIMA en registrar-cobranza.dto.ts
+
 function fmtMoney(n: number) {
   return new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 0 }).format(n || 0);
 }
@@ -36,6 +45,9 @@ export default function Facturas() {
   const [pendientes, setPendientes] = useState<any[]>([]);
   const [detalle, setDetalle] = useState<any>(null);
   const [cobranza, setCobranza] = useState({ fecha: new Date().toISOString().slice(0, 10), importe: "", medioPago: "" });
+  // FAC-4: descripción libre cuando cobranza.medioPago === "OTRO" — nunca se envía "OTRO" en sí,
+  // se envía esto (recortado). Ver medioPagoAEnviar más abajo.
+  const [medioPagoOtro, setMedioPagoOtro] = useState("");
 
   const [form, setForm] = useState({ clienteId: "", numero: "", fecha: new Date().toISOString().slice(0, 10), vencimiento: "" });
   const [viajesSel, setViajesSel] = useState<Set<string>>(new Set());
@@ -101,19 +113,29 @@ export default function Facturas() {
     setDetalle(data);
   }
 
+  // FAC-4: valor real a enviar/auditar — nunca el literal "OTRO". Si el medio elegido es "OTRO",
+  // se envía la descripción recortada; si está vacía (o no se eligió nada todavía), esto es "" y
+  // el botón de abajo queda deshabilitado — no se puede registrar sin un medio confirmado.
+  const medioPagoAEnviar = cobranza.medioPago === MEDIO_PAGO_OTRO ? medioPagoOtro.trim() : cobranza.medioPago;
+
   async function registrarCobranza() {
-    if (!detalle) return;
+    if (!detalle || !medioPagoAEnviar) return;
     const importeCobranza = Number(cobranza.importe) || 0;
     const ok = await confirm({
       title: "Registrar cobranza",
-      message: `¿Registrar una cobranza de ${fmtMoney(importeCobranza)}${cobranza.medioPago ? ` por ${cobranza.medioPago}` : ""} para la factura ${detalle.numero}?`,
+      message: `¿Registrar una cobranza de ${fmtMoney(importeCobranza)} por ${medioPagoAEnviar} para la factura ${detalle.numero}?`,
       confirmLabel: "Registrar cobranza",
     });
     if (!ok.confirmed) return;
     run(
       async () => {
-        await api.post(`/facturas/${detalle.id}/cobranzas`, { ...cobranza, importe: importeCobranza });
+        await api.post(`/facturas/${detalle.id}/cobranzas`, {
+          fecha: cobranza.fecha,
+          importe: importeCobranza,
+          medioPago: medioPagoAEnviar,
+        });
         setCobranza({ fecha: new Date().toISOString().slice(0, 10), importe: "", medioPago: "" });
+        setMedioPagoOtro("");
         await verDetalle(detalle.id);
         buscar(pagina, limite);
       },
@@ -307,8 +329,20 @@ export default function Facturas() {
             <div className="filters" style={{ marginTop: "0.8rem" }}>
               <input type="date" value={cobranza.fecha} onChange={(e) => setCobranza({ ...cobranza, fecha: e.target.value })} />
               <input type="number" placeholder="Importe" value={cobranza.importe} onChange={(e) => setCobranza({ ...cobranza, importe: e.target.value })} />
-              <input placeholder="Medio de pago" value={cobranza.medioPago} onChange={(e) => setCobranza({ ...cobranza, medioPago: e.target.value })} />
-              <button className="btn" disabled={busy} onClick={registrarCobranza}>Registrar cobranza</button>
+              <select value={cobranza.medioPago} onChange={(e) => setCobranza({ ...cobranza, medioPago: e.target.value })}>
+                <option value="">Seleccionar...</option>
+                {MEDIOS_PAGO_RAPIDOS.map((m) => <option key={m} value={m}>{m}</option>)}
+                <option value={MEDIO_PAGO_OTRO}>Otro</option>
+              </select>
+              {cobranza.medioPago === MEDIO_PAGO_OTRO && (
+                <input
+                  placeholder="Describí el medio de pago"
+                  value={medioPagoOtro}
+                  maxLength={MEDIO_PAGO_OTRO_LONGITUD_MAXIMA}
+                  onChange={(e) => setMedioPagoOtro(e.target.value)}
+                />
+              )}
+              <button className="btn" disabled={busy || !medioPagoAEnviar} onClick={registrarCobranza}>Registrar cobranza</button>
             </div>
           )}
 

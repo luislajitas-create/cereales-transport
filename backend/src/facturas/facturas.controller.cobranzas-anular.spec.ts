@@ -1,4 +1,4 @@
-import { BadRequestException, NotFoundException } from "@nestjs/common";
+import { BadRequestException, NotFoundException, UnauthorizedException } from "@nestjs/common";
 import { FacturasController } from "./facturas.controller";
 import { OrganizacionPrismaClient } from "../prisma/organizacion-prisma.client";
 
@@ -243,5 +243,32 @@ describe("FacturasController.anularCobranza (FAC-3)", () => {
     expect(tx.cobranza.update).not.toHaveBeenCalled();
     expect(tx.auditLog.create).not.toHaveBeenCalled();
     expect(tx.factura.update).not.toHaveBeenCalled();
+  });
+
+  it("nunca genera una auditoría de Cobranza con usuarioId null: rechaza si no hay usuario identificable (user undefined)", async () => {
+    const factura = { id: "fact-1", importe: 600, estado: "COBRADO_PARCIAL", cobranzas: [cobranza({ id: "cob-1" })] };
+    const tx = crearTx([factura]);
+    const prisma = crearPrismaMock(tx);
+    const controller = new FacturasController(prisma);
+
+    await expect(
+      controller.anularCobranza("fact-1", "cob-1", { motivo: "x" }, undefined as any),
+    ).rejects.toThrow(UnauthorizedException);
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(tx.cobranza.update).not.toHaveBeenCalled();
+    expect(tx.auditLog.create).not.toHaveBeenCalled();
+  });
+
+  it("nunca genera una auditoría de Cobranza con usuarioId null: rechaza si el usuario no tiene id (objeto sin id)", async () => {
+    const factura = { id: "fact-1", importe: 600, estado: "COBRADO_PARCIAL", cobranzas: [cobranza({ id: "cob-1" })] };
+    const tx = crearTx([factura]);
+    const prisma = crearPrismaMock(tx);
+    const controller = new FacturasController(prisma);
+
+    await expect(
+      controller.anularCobranza("fact-1", "cob-1", { motivo: "x" }, { rol: "FACTURACION" } as any),
+    ).rejects.toThrow(UnauthorizedException);
+    expect(tx.cobranza.update).not.toHaveBeenCalled();
+    expect(tx.auditLog.create).not.toHaveBeenCalled();
   });
 });

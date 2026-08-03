@@ -257,4 +257,55 @@ describe("Bloque 11, H-02 (V2 enmendada) — organizacion-prisma.client", () => 
       expect(typeof Function.prototype.bind).toBe("function");
     });
   });
+
+  // ── G. Aislamiento cruzado de organización — auditLog.groupBy (FAC-4) ─────────────────────
+  // A diferencia de las secciones anteriores (que prueban que la extensión sigue funcionando),
+  // esto prueba específicamente que groupBy() AÍSLA datos reales entre dos organizaciones
+  // distintas — necesario para el nuevo GET /organizacion/auditoria/opciones (FAC-4), que arma
+  // sus listas de Entidad/Acción sin agregar ningún where manual, confiando por completo en esta
+  // extensión. Usa DB local real (mismo criterio que el resto del archivo); crea sus propias
+  // Organizacion/AuditLog temporales y las borra en afterAll — no toca datos preexistentes.
+  describe("G. Aislamiento cruzado de organización — auditLog.groupBy (FAC-4)", () => {
+    let orgA: { id: string };
+    let orgB: { id: string };
+
+    beforeAll(async () => {
+      orgA = await prismaService.organizacion.create({ data: { nombre: "FAC-4 test aislamiento — org A (temporal)" } });
+      orgB = await prismaService.organizacion.create({ data: { nombre: "FAC-4 test aislamiento — org B (temporal)" } });
+      await prismaService.auditLog.create({
+        data: { organizacionId: orgA.id, entidad: "FAC4EntidadSoloDeA", entidadId: orgA.id, accion: "fac4_accion_solo_de_a" },
+      });
+      await prismaService.auditLog.create({
+        data: { organizacionId: orgB.id, entidad: "FAC4EntidadSoloDeB", entidadId: orgB.id, accion: "fac4_accion_solo_de_b" },
+      });
+    });
+
+    afterAll(async () => {
+      await prismaService.auditLog.deleteMany({ where: { organizacionId: { in: [orgA.id, orgB.id] } } });
+      await prismaService.organizacion.deleteMany({ where: { id: { in: [orgA.id, orgB.id] } } });
+    });
+
+    it("groupBy por entidad, en el contexto de orgA, no incluye la entidad exclusiva de orgB", async () => {
+      // El callback de organizacionContextStorage.run() debe ser async y AWAITEAR la query
+      // adentro (mismo criterio que conContexto() más arriba en este archivo) — Prisma devuelve
+      // una PrismaPromise diferida; si el callback la retorna sin awaitear, el then() real (y
+      // con él, la lectura de obtenerOrganizacionIdActual() dentro de la extensión) se ejecuta
+      // después de que run() ya cerró el contexto, y falla con "Sin contexto de organización".
+      const resultado = await organizacionContextStorage.run({ organizacionId: orgA.id }, async () => {
+        return await clientePrismaService.auditLog.groupBy({ by: ["entidad"] });
+      });
+      const entidades = resultado.map((r: any) => r.entidad);
+      expect(entidades).toContain("FAC4EntidadSoloDeA");
+      expect(entidades).not.toContain("FAC4EntidadSoloDeB");
+    });
+
+    it("groupBy por accion, en el contexto de orgB, no incluye la acción exclusiva de orgA", async () => {
+      const resultado = await organizacionContextStorage.run({ organizacionId: orgB.id }, async () => {
+        return await clientePrismaService.auditLog.groupBy({ by: ["accion"] });
+      });
+      const acciones = resultado.map((r: any) => r.accion);
+      expect(acciones).toContain("fac4_accion_solo_de_b");
+      expect(acciones).not.toContain("fac4_accion_solo_de_a");
+    });
+  });
 });

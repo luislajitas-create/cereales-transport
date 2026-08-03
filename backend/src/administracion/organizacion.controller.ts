@@ -69,6 +69,27 @@ export class OrganizacionController {
     return actualizada;
   }
 
+  // FAC-4 — reemplaza los filtros de texto libre "Entidad"/"Acción" del frontend (obsoletos en
+  // cuanto alguien tipeaba un valor que ya no existe) por listas reales, derivadas de los datos
+  // efectivamente registrados. groupBy es uno de los métodos cubiertos por la extensión de
+  // aislamiento (organizacion-prisma.client.ts) — igual que en auditoria() más abajo, no hace
+  // falta agregar organizacionId acá: la extensión ya lo inyecta en cualquier groupBy sobre un
+  // modelo organizacional (probado con datos reales de dos organizaciones distintas en
+  // organizacion-prisma.client.spec.ts). Ordenado alfabéticamente y sin duplicados por
+  // construcción (groupBy nunca repite un valor de agrupación).
+  @Roles("ADMINISTRADOR")
+  @Get("auditoria/opciones")
+  async auditoriaOpciones() {
+    const [entidades, acciones] = await Promise.all([
+      this.prisma.auditLog.groupBy({ by: ["entidad"] }),
+      this.prisma.auditLog.groupBy({ by: ["accion"] }),
+    ]);
+    return {
+      entidades: entidades.map((e) => e.entidad).sort(),
+      acciones: acciones.map((a) => a.accion).sort(),
+    };
+  }
+
   // Bloque 9.5 (consulta) — auditLog es un modelo organizacional: el aislamiento por
   // organizacionId lo aplica ORGANIZACION_PRISMA automáticamente (organizacion-prisma.client.ts)
   // sobre CUALQUIER where que se le pase, incluidos los filtros de abajo — por eso alcanza con
@@ -108,6 +129,11 @@ export class OrganizacionController {
         orderBy: { fecha: "desc" },
         skip: (page - 1) * limit,
         take: limit,
+        // FAC-4: se agregan datosAnteriores/datosNuevos al select — sin esto, la pantalla de
+        // Auditoría Administrativa no puede mostrar el detalle de NINGÚN evento (ni el de
+        // anularCobranza de FAC-3, ni el nuevo de registrarCobranza), solo entidad/entidadId/
+        // accion/usuario/fecha. Cambio genérico (no específico de Cobranza): habilita el detalle
+        // para cualquier evento existente o futuro, sin rediseñar la pantalla.
         select: {
           id: true,
           fecha: true,
@@ -116,6 +142,8 @@ export class OrganizacionController {
           entidadId: true,
           usuarioId: true,
           usuario: { select: { nombre: true, email: true, rol: true } },
+          datosAnteriores: true,
+          datosNuevos: true,
         },
       }),
     ]);
