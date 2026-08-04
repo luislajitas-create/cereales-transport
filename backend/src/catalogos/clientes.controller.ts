@@ -11,7 +11,8 @@ import { Roles } from "../auth/roles.decorator";
 import { ORGANIZACION_PRISMA } from "../prisma/organizacion-prisma.token";
 import { OrganizacionPrismaClient } from "../prisma/organizacion-prisma.client";
 import { encontrarOFallar } from "../common/encontrar-o-fallar";
-import { parsearCsv, filasComoObjetos } from "../common/csv";
+import { parsearCsv, filasComoObjetos, LIMITE_FILAS_IMPORTACION_CSV } from "../common/csv";
+import { mensajeErrorImportacion } from "../common/importacion-errores";
 import { CreateClienteDto } from "./dto/create-cliente.dto";
 import { UpdateClienteDto } from "./dto/update-cliente.dto";
 
@@ -51,16 +52,26 @@ export class ClientesController {
   // CAT-1 (importación masiva): cada fila se valida con el mismo CreateClienteDto que usa el
   // alta individual (misma regla, no se reimplementa nada) y se procesa de forma independiente
   // — una fila inválida o que falle al crear no aborta el archivo completo ni las demás filas
-  // válidas. No se verifica CUIT duplicado: el alta individual (create() de arriba) tampoco lo
-  // hace hoy en ningún lugar del sistema (confirmado en el schema: cuit no es @unique) — mismo
-  // criterio, no se inventa una regla nueva solo para la importación masiva.
+  // válidas. No se verifica CUIT duplicado en lote (a diferencia de Choferes/Vehículos en CAT-2):
+  // el alta individual tampoco lo hace hoy. Nota: el schema SÍ tiene
+  // @@unique([organizacionId, cuit]) en Cliente — un duplicado sigue rechazándose vía P2002 en el
+  // catch de abajo (mensajeErrorImportacion), solo que sin la detección proactiva en lote. Ampliar
+  // esto es una mejora futura, fuera del alcance de este cierre.
   @Roles("OPERACIONES", "FACTURACION", "ADMINISTRADOR")
   @Post("importar")
   @UseInterceptors(FileInterceptor("archivo", { limits: { fileSize: 2 * 1024 * 1024 } }))
   async importar(@UploadedFile() archivo?: Express.Multer.File) {
     if (!archivo) throw new BadRequestException("Debe adjuntar un archivo CSV en el campo 'archivo'.");
-    const filas = filasComoObjetos(parsearCsv(archivo.buffer.toString("utf-8")));
-    if (filas.length === 0) throw new BadRequestException("El archivo no tiene filas de datos para importar.");
+    const filasCrudas = parsearCsv(archivo.buffer.toString("utf-8"));
+    if (filasCrudas.length === 0) throw new BadRequestException("El archivo está vacío.");
+    const filasDeDatos = filasCrudas.length - 1;
+    if (filasDeDatos === 0) throw new BadRequestException("El archivo no tiene filas de datos para importar.");
+    if (filasDeDatos > LIMITE_FILAS_IMPORTACION_CSV) {
+      throw new BadRequestException(
+        `El archivo supera el límite de ${LIMITE_FILAS_IMPORTACION_CSV} filas de datos (tiene ${filasDeDatos}).`,
+      );
+    }
+    const filas = filasComoObjetos(filasCrudas);
 
     const detalle: { fila: number; ok: boolean; mensaje: string }[] = [];
     let creados = 0;
@@ -85,7 +96,7 @@ export class ClientesController {
         creados++;
         detalle.push({ fila: numeroFila, ok: true, mensaje: "Creado correctamente." });
       } catch (error) {
-        detalle.push({ fila: numeroFila, ok: false, mensaje: error instanceof Error ? error.message : "Error desconocido al crear." });
+        detalle.push({ fila: numeroFila, ok: false, mensaje: mensajeErrorImportacion(error) });
       }
     }
     return { total: filas.length, creados, rechazados: filas.length - creados, detalle };

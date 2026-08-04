@@ -1,24 +1,7 @@
 import { ArgumentsHost, Catch, ExceptionFilter } from "@nestjs/common";
 import { Request, Response } from "express";
 import { Prisma } from "@prisma/client";
-
-const CAMPO_LEGIBLE: Record<string, string> = {
-  cuit: "CUIT",
-  cuil: "CUIL",
-  dni: "DNI",
-  patente: "patente",
-  ctg: "CTG",
-  numero: "número de factura",
-  email: "email",
-  nombre: "nombre",
-};
-
-function mensajeUnico(target: unknown): string {
-  const campos = Array.isArray(target) ? target : typeof target === "string" ? [target] : [];
-  const legibles = campos.map((c) => CAMPO_LEGIBLE[c] || c);
-  if (legibles.length === 0) return "Ya existe un registro con estos datos";
-  return `Ya existe un registro con este ${legibles.join(", ")}`;
-}
+import { mensajeUnico } from "../prisma-mensajes";
 
 @Catch(Prisma.PrismaClientKnownRequestError)
 export class PrismaExceptionFilter implements ExceptionFilter {

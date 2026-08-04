@@ -58,10 +58,10 @@ describe("ClientesController.importar (CAT-1)", () => {
     expect(resultado.detalle[1]).toEqual({ fila: 3, ok: true, mensaje: "Creado correctamente." });
   });
 
-  it("si prisma.create falla para una fila, se reporta como rechazada sin abortar el resto", async () => {
+  it("si prisma.create falla para una fila con un error inesperado, se reporta rechazada con un mensaje genérico (nunca el error.message crudo)", async () => {
     const crear = jest
       .fn()
-      .mockRejectedValueOnce(new Error("fallo de base de datos"))
+      .mockRejectedValueOnce(new Error("connection terminated unexpectedly at db.internal:5432"))
       .mockImplementationOnce(({ data }) => Promise.resolve({ id: "x", ...data }));
     const controller = new ClientesController(crearPrismaMock({ crear }));
     const archivo = crearArchivo("razonSocial,cuit\nCliente Uno,30-11111111-1\nCliente Dos,30-22222222-2");
@@ -71,7 +71,8 @@ describe("ClientesController.importar (CAT-1)", () => {
     expect(resultado.creados).toBe(1);
     expect(resultado.rechazados).toBe(1);
     expect(resultado.detalle[0].ok).toBe(false);
-    expect(resultado.detalle[0].mensaje).toContain("fallo de base de datos");
+    expect(resultado.detalle[0].mensaje).toBe("No se pudo crear el registro por un error inesperado.");
+    expect(resultado.detalle[0].mensaje).not.toContain("db.internal");
   });
 
   it("archivo sin filas de datos (solo encabezado) rechaza con BadRequestException", async () => {

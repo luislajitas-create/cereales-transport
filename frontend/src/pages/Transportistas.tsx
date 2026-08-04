@@ -7,6 +7,7 @@ import { useAsyncAction } from "../hooks/useAsyncAction";
 const TRANSPORTISTA_VACIO = { razonSocial: "", cuit: "", domicilio: "" };
 
 type Orden = "razonSocial" | "createdAt" | "activo";
+type ResultadoImportacion = { total: number; creados: number; rechazados: number; detalle: { fila: number; ok: boolean; mensaje: string }[] };
 
 export default function Transportistas() {
   const { usuario } = useAuth();
@@ -41,7 +42,16 @@ export default function Transportistas() {
   // reemplazo.
   const [archivoImportar, setArchivoImportar] = useState<File | null>(null);
   const [importando, setImportando] = useState(false);
-  const [resultadoImportacion, setResultadoImportacion] = useState<{ total: number; creados: number; rechazados: number; detalle: { fila: number; ok: boolean; mensaje: string }[] } | null>(null);
+  const [resultadoImportacion, setResultadoImportacion] = useState<ResultadoImportacion | null>(null);
+  // CAT-2: mismo patrón que la importación de Transportistas (CAT-1), pero como dos bloques
+  // separados e independientes — Choferes y Vehículos son importaciones distintas, con roles y
+  // endpoints propios, no una extensión del bloque de arriba.
+  const [archivoImportarChoferes, setArchivoImportarChoferes] = useState<File | null>(null);
+  const [importandoChoferes, setImportandoChoferes] = useState(false);
+  const [resultadoImportacionChoferes, setResultadoImportacionChoferes] = useState<ResultadoImportacion | null>(null);
+  const [archivoImportarVehiculos, setArchivoImportarVehiculos] = useState<File | null>(null);
+  const [importandoVehiculos, setImportandoVehiculos] = useState(false);
+  const [resultadoImportacionVehiculos, setResultadoImportacionVehiculos] = useState<ResultadoImportacion | null>(null);
 
   // CRM-2: incluirInactivos=true — antes esta pantalla solo pedía activos, lo cual habría
   // dejado los KPIs de "inactivos"/"total" siempre en 0 y sin forma de ver ni reactivar a quien
@@ -80,6 +90,68 @@ export default function Transportistas() {
       setError(err?.response?.data?.message || "No se pudo importar el archivo");
     } finally {
       setImportando(false);
+    }
+  }
+
+  async function descargarPlantillaImportacionChoferes() {
+    const { data } = await api.get("/choferes/importar/plantilla", { responseType: "blob" });
+    const url = window.URL.createObjectURL(new Blob([data]));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "plantilla-choferes.csv";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.URL.revokeObjectURL(url);
+  }
+
+  async function importarChoferesCsv() {
+    if (!archivoImportarChoferes) return;
+    setImportandoChoferes(true);
+    setError("");
+    setResultadoImportacionChoferes(null);
+    try {
+      const formData = new FormData();
+      formData.append("archivo", archivoImportarChoferes);
+      const { data } = await api.post("/choferes/importar", formData);
+      setResultadoImportacionChoferes(data);
+      setArchivoImportarChoferes(null);
+      cargar();
+    } catch (err: any) {
+      setError(err?.response?.data?.message || "No se pudo importar el archivo");
+    } finally {
+      setImportandoChoferes(false);
+    }
+  }
+
+  async function descargarPlantillaImportacionVehiculos() {
+    const { data } = await api.get("/vehiculos/importar/plantilla", { responseType: "blob" });
+    const url = window.URL.createObjectURL(new Blob([data]));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "plantilla-vehiculos.csv";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.URL.revokeObjectURL(url);
+  }
+
+  async function importarVehiculosCsv() {
+    if (!archivoImportarVehiculos) return;
+    setImportandoVehiculos(true);
+    setError("");
+    setResultadoImportacionVehiculos(null);
+    try {
+      const formData = new FormData();
+      formData.append("archivo", archivoImportarVehiculos);
+      const { data } = await api.post("/vehiculos/importar", formData);
+      setResultadoImportacionVehiculos(data);
+      setArchivoImportarVehiculos(null);
+      cargar();
+    } catch (err: any) {
+      setError(err?.response?.data?.message || "No se pudo importar el archivo");
+    } finally {
+      setImportandoVehiculos(false);
     }
   }
 
@@ -248,6 +320,60 @@ export default function Transportistas() {
               {resultadoImportacion.rechazados > 0 && (
                 <ul style={{ margin: "0.4rem 0 0", paddingLeft: "1.2rem" }}>
                   {resultadoImportacion.detalle.filter((d) => !d.ok).map((d) => (
+                    <li key={d.fila}>Fila {d.fila}: {d.mensaje}</li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {puedeGestionarChoferes && (
+        <div className="card">
+          <div className="section-title">Importar Choferes</div>
+          <p className="muted">Cargá varios choferes a la vez para transportistas ya existentes. El CUIT identifica al transportista — descargá la plantilla para ver todas las columnas.</p>
+          <div className="actions-row">
+            <button className="btn secondary" type="button" onClick={descargarPlantillaImportacionChoferes}>Descargar plantilla</button>
+            <input type="file" accept=".csv" onChange={(e) => setArchivoImportarChoferes(e.target.files?.[0] || null)} />
+            <button className="btn" type="button" disabled={!archivoImportarChoferes || importandoChoferes} onClick={importarChoferesCsv}>
+              {importandoChoferes ? "Importando..." : "Importar"}
+            </button>
+          </div>
+          {resultadoImportacionChoferes && (
+            <div className={resultadoImportacionChoferes.rechazados > 0 ? "warning-banner" : "success-banner"}>
+              <strong>{resultadoImportacionChoferes.creados} de {resultadoImportacionChoferes.total} choferes creados</strong>
+              {resultadoImportacionChoferes.rechazados > 0 && ` — ${resultadoImportacionChoferes.rechazados} rechazados:`}
+              {resultadoImportacionChoferes.rechazados > 0 && (
+                <ul style={{ margin: "0.4rem 0 0", paddingLeft: "1.2rem" }}>
+                  {resultadoImportacionChoferes.detalle.filter((d) => !d.ok).map((d) => (
+                    <li key={d.fila}>Fila {d.fila}: {d.mensaje}</li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {puedeGestionarTransportistas && (
+        <div className="card">
+          <div className="section-title">Importar Vehículos</div>
+          <p className="muted">Cargá varios vehículos a la vez para transportistas ya existentes. El CUIT identifica al transportista — descargá la plantilla para ver todas las columnas.</p>
+          <div className="actions-row">
+            <button className="btn secondary" type="button" onClick={descargarPlantillaImportacionVehiculos}>Descargar plantilla</button>
+            <input type="file" accept=".csv" onChange={(e) => setArchivoImportarVehiculos(e.target.files?.[0] || null)} />
+            <button className="btn" type="button" disabled={!archivoImportarVehiculos || importandoVehiculos} onClick={importarVehiculosCsv}>
+              {importandoVehiculos ? "Importando..." : "Importar"}
+            </button>
+          </div>
+          {resultadoImportacionVehiculos && (
+            <div className={resultadoImportacionVehiculos.rechazados > 0 ? "warning-banner" : "success-banner"}>
+              <strong>{resultadoImportacionVehiculos.creados} de {resultadoImportacionVehiculos.total} vehículos creados</strong>
+              {resultadoImportacionVehiculos.rechazados > 0 && ` — ${resultadoImportacionVehiculos.rechazados} rechazados:`}
+              {resultadoImportacionVehiculos.rechazados > 0 && (
+                <ul style={{ margin: "0.4rem 0 0", paddingLeft: "1.2rem" }}>
+                  {resultadoImportacionVehiculos.detalle.filter((d) => !d.ok).map((d) => (
                     <li key={d.fila}>Fila {d.fila}: {d.mensaje}</li>
                   ))}
                 </ul>

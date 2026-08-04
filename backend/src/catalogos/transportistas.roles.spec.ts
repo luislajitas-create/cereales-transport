@@ -57,14 +57,37 @@ describe("RolesGuard — endpoints reales de Transportistas/Choferes/Vehiculos (
     ["create", ChoferesController.prototype.create],
     ["update (incluye edicion de comision)", ChoferesController.prototype.update],
     ["remove (baja logica)", ChoferesController.prototype.remove],
+    // CAT-2: mismos roles que create() — la importación masiva no es una puerta de acceso
+    // distinta al alta individual, es el mismo conjunto de permisos. La descarga de plantilla usa
+    // la misma matriz (cierre de CAT-2): revela nombres de columnas del dominio, se restringe
+    // igual que la importación en sí.
+    ["importar (CSV, CAT-2)", ChoferesController.prototype.importar],
+    ["plantillaImportacion (CSV, CAT-2)", ChoferesController.prototype.plantillaImportacion],
   ];
 
   it.each(ESCRITURA_CHOFER)("Chofer.%s rechaza a un usuario LECTURA", (_nombre, handler) => {
     expect(guard.canActivate(contextoPara(handler, ChoferesController, "LECTURA"))).toBe(false);
   });
 
+  it.each(ESCRITURA_CHOFER)("Chofer.%s rechaza sin usuario autenticado", (_nombre, handler) => {
+    expect(guard.canActivate(contextoPara(handler, ChoferesController, undefined))).toBe(false);
+  });
+
+  it.each(ESCRITURA_CHOFER)("Chofer.%s rechaza a GERENCIA/FACTURACION (roles sin alcance sobre Choferes)", (_nombre, handler) => {
+    expect(guard.canActivate(contextoPara(handler, ChoferesController, "GERENCIA"))).toBe(false);
+    expect(guard.canActivate(contextoPara(handler, ChoferesController, "FACTURACION"))).toBe(false);
+  });
+
+  it.each(ESCRITURA_CHOFER)("Chofer.%s permite a OPERACIONES", (_nombre, handler) => {
+    expect(guard.canActivate(contextoPara(handler, ChoferesController, "OPERACIONES"))).toBe(true);
+  });
+
   it.each(ESCRITURA_CHOFER)("Chofer.%s permite a LIQUIDACIONES", (_nombre, handler) => {
     expect(guard.canActivate(contextoPara(handler, ChoferesController, "LIQUIDACIONES"))).toBe(true);
+  });
+
+  it.each(ESCRITURA_CHOFER)("Chofer.%s permite a ADMINISTRADOR (override universal)", (_nombre, handler) => {
+    expect(guard.canActivate(contextoPara(handler, ChoferesController, "ADMINISTRADOR"))).toBe(true);
   });
 
   it("Chofer.findAll (consulta) no exige rol especifico — LECTURA puede listar", () => {
@@ -75,14 +98,37 @@ describe("RolesGuard — endpoints reales de Transportistas/Choferes/Vehiculos (
     ["create", VehiculosController.prototype.create],
     ["update", VehiculosController.prototype.update],
     ["remove (baja logica)", VehiculosController.prototype.remove],
+    // CAT-2: mismos roles que create() — LIQUIDACIONES puede gestionar Choferes pero, a
+    // propósito, no Vehiculos (matriz real del backend, confirmada arriba para create/update/
+    // remove); la importación masiva respeta exactamente la misma matriz. La descarga de
+    // plantilla usa la misma matriz (cierre de CAT-2).
+    ["importar (CSV, CAT-2)", VehiculosController.prototype.importar],
+    ["plantillaImportacion (CSV, CAT-2)", VehiculosController.prototype.plantillaImportacion],
   ];
 
   it.each(ESCRITURA_VEHICULO)("Vehiculo.%s rechaza a un usuario LECTURA", (_nombre, handler) => {
     expect(guard.canActivate(contextoPara(handler, VehiculosController, "LECTURA"))).toBe(false);
   });
 
+  it.each(ESCRITURA_VEHICULO)("Vehiculo.%s rechaza sin usuario autenticado", (_nombre, handler) => {
+    expect(guard.canActivate(contextoPara(handler, VehiculosController, undefined))).toBe(false);
+  });
+
+  it.each(ESCRITURA_VEHICULO)("Vehiculo.%s rechaza a GERENCIA/FACTURACION (roles sin alcance sobre Vehiculos)", (_nombre, handler) => {
+    expect(guard.canActivate(contextoPara(handler, VehiculosController, "GERENCIA"))).toBe(false);
+    expect(guard.canActivate(contextoPara(handler, VehiculosController, "FACTURACION"))).toBe(false);
+  });
+
   it.each(ESCRITURA_VEHICULO)("Vehiculo.%s rechaza a LIQUIDACIONES (a diferencia de Choferes, aqui no alcanza)", (_nombre, handler) => {
     expect(guard.canActivate(contextoPara(handler, VehiculosController, "LIQUIDACIONES"))).toBe(false);
+  });
+
+  it.each(ESCRITURA_VEHICULO)("Vehiculo.%s permite a OPERACIONES", (_nombre, handler) => {
+    expect(guard.canActivate(contextoPara(handler, VehiculosController, "OPERACIONES"))).toBe(true);
+  });
+
+  it.each(ESCRITURA_VEHICULO)("Vehiculo.%s permite a ADMINISTRADOR (override universal)", (_nombre, handler) => {
+    expect(guard.canActivate(contextoPara(handler, VehiculosController, "ADMINISTRADOR"))).toBe(true);
   });
 
   it("Vehiculo.findAll (consulta) no exige rol especifico — LECTURA puede listar", () => {

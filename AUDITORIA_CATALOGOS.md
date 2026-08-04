@@ -71,3 +71,57 @@ Nótese la asimetría real entre Choferes (admite LIQUIDACIONES) y Vehículos (n
 **Validación:** backend build OK, 19/19 suites, **157/157 tests** (+32 del nuevo spec). Frontend typecheck + build OK. Vite dev (instancia única, verificada sin procesos zombis) confirmado sirviendo el código actualizado antes de cada validación. Validado en navegador real como `ADMINISTRADOR`: edición, cancelación, desactivación, reactivación, búsqueda, orden, KPIs, importación CSV y expansión de choferes/vehículos, todo sin regresiones. La verificación de autorización para LECTURA se hizo a nivel de pruebas automatizadas contra el mecanismo real (no visualmente, por no contar con acceso a esa cuenta en este entorno).
 
 **Deuda remanente (backlog):** el mismo gating de UI (`puedeGestionarX`) que Clientes (CRM-1) tampoco tiene — queda como candidato a revisar junto con CRM-1 si se decide una pasada de auditoría de autorización a nivel de todo el frontend.
+
+---
+
+## CAT-2 — Importación masiva de Choferes y Vehículos (CSV)
+
+**Objetivo:** cerrar el backlog dejado abierto por CAT-1 — permitir la incorporación masiva de choferes y vehículos pertenecientes a transportistas **ya existentes**, con el mismo criterio de CAT-1 (parser compartido, resultado parcial por fila, sin rollback de archivo), preservando aislamiento multiempresa, validaciones de dominio reales y permisos exactos.
+
+### Endpoints y plantillas
+
+| Recurso | Plantilla | Importación |
+|---|---|---|
+| Choferes | `GET /choferes/importar/plantilla` | `POST /choferes/importar` (`multipart/form-data`, campo `archivo`) |
+| Vehículos | `GET /vehiculos/importar/plantilla` | `POST /vehiculos/importar` (`multipart/form-data`, campo `archivo`) |
+
+**Encabezados de Choferes:** `transportistaCuit,nombre,dni,cuil,comisionPct,licenciaNumero,licenciaVencimiento,telefono` (mismas columnas de `CreateChoferDto`, salvo `transportistaId`).
+**Encabezados de Vehículos:** `transportistaCuit,patente,marca,modelo,tipo,capacidadKg,vencimientoRto,vencimientoSeguro` (mismas columnas de `CreateVehiculoDto`, salvo `transportistaId`). Ninguna plantilla expone IDs internos.
+
+### Resolución del transportista
+
+La relación se resuelve por `transportistaCuit` (comparación exacta post-`trim()`) contra `Transportista.cuit`, la única clave comercial estable disponible (`@@unique([organizacionId, cuit])`). La consulta (`transportista.findMany`) ya viene acotada a la organización activa por la extensión de aislamiento (Bloque 8.1.d, `organizacion-prisma.client.ts`): un CUIT de **otra organización** produce el mismo resultado que un CUIT **inexistente** — decisión deliberada, no un bug, para no filtrar entre organizaciones si un CUIT ajeno existe o no. Nunca se auto-crea un transportista faltante: la fila se rechaza con `"No existe un transportista con CUIT '<cuit>' en esta organización."`.
+
+### Matriz de roles
+
+| Acción | Endpoint | Roles permitidos |
+|---|---|---|
+| Importar / plantilla Choferes | `POST /choferes/importar`, `GET /choferes/importar/plantilla` | OPERACIONES, LIQUIDACIONES, ADMINISTRADOR |
+| Importar / plantilla Vehículos | `POST /vehiculos/importar`, `GET /vehiculos/importar/plantilla` | OPERACIONES, ADMINISTRADOR |
+
+Misma matriz que el alta individual (`create()`) de cada recurso — la importación masiva no es una puerta de acceso distinta. La descarga de plantilla quedó bajo la misma matriz que su importación (antes no tenía `@Roles()`, quedaba abierta a cualquier rol autenticado). El backend rechaza el llamado aunque se bypasee el gating de UI (`RolesGuard` real, no un chequeo solo de frontend).
+
+### Validaciones, límites y manejo seguro de errores
+
+- **Duplicados reales según el schema** (auditado directamente, no asumido): Chofer tiene **dos** restricciones únicas por organización — `@@unique([organizacionId, cuil])` y `@@unique([organizacionId, dni])` —; Vehiculo tiene una sola, `@@unique([organizacionId, patente])`. Ambos se resuelven en **una consulta batch** (nunca una por fila): Choferes con un `OR` combinado sobre CUIL/DNI, Vehículos sobre patente. DNI es opcional (`dni String?`): solo se compara cuando la fila lo trae, porque varios choferes sin DNI son válidos (`NULL` no colisiona consigo mismo en Postgres). Se detecta contra la base **y** dentro del propio archivo, sin convertir silenciosamente un alta en edición.
+- **Encabezado rechaza el archivo completo, antes de leer una sola fila y antes de cualquier consulta o escritura**, si: falta un encabezado obligatorio (Choferes: `transportistaCuit,nombre,cuil`; Vehículos: `transportistaCuit,patente,tipo`) o hay encabezados duplicados (que hoy pisarían datos silenciosamente al mapear por nombre). Columnas adicionales no reconocidas se siguen permitiendo — mismo criterio que CAT-1, que las ignora en vez de rechazarlas.
+- **Límite de filas:** CAT-1 no tenía límite explícito (solo 2 MB de tamaño de archivo). Se definió `LIMITE_FILAS_IMPORTACION_CSV = 2000` en `backend/src/common/csv.ts`, una única constante compartida aplicada a **las cuatro** importaciones del sistema (Clientes, Transportistas, Choferes, Vehículos) para no dejar comportamientos distintos entre catálogos. Un archivo vacío o que supere el límite se rechaza completo, sin escribir nada.
+- **Manejo seguro de errores de base de datos** (`backend/src/common/importacion-errores.ts`, nuevo): la base queda como última defensa ante condiciones de carrera (dos filas del archivo, o dos importaciones concurrentes, apuntando al mismo valor único) incluso después de la detección en lote + en memoria. `P2002` se traduce a un mensaje funcional por campo (reutilizando `mensajeUnico()`, extraída a `backend/src/common/prisma-mensajes.ts` para que la use también `PrismaExceptionFilter`, sin duplicar la lógica); otros códigos Prisma conocidos (`P2003`/`P2025`) devuelven un mensaje genérico de dominio. **Nunca se devuelve `error.message` crudo de Prisma/PostgreSQL al usuario** — para errores inesperados se devuelve un mensaje genérico fijo y solo se registra en el log del servidor el tipo de error, nunca el mensaje completo ni los datos de la fila (pueden contener información personal). Este mismo manejo (límite de filas + traducción segura de errores) se aplicó también a los importadores de CAT-1 (`transportistas.controller.ts`, `clientes.controller.ts`) para no dejarlos con un comportamiento más débil que CAT-2.
+- **Rendimiento:** resolución de transportistas y de duplicados en lote (una consulta cada una, nunca una por fila), verificado con pruebas dedicadas.
+- **Auditoría (AuditLog):** se confirmó que el alta individual de Chofer/Vehículo no genera `AuditLog` — la importación masiva sigue la misma política vigente y tampoco genera ninguno. No se amplió ni se rediseñó la Auditoría Administrativa (FAC-4).
+- **Normalización:** se auditó el sistema completo (backend y frontend) y se confirmó que **no existe hoy ninguna normalización** de CUIT/CUIL/DNI/patente (mayúsculas, guiones, espacios) en ningún punto — solo el `.trim()` genérico del parser CSV compartido. **Decisión explícita: CAT-2 no introdujo normalización nueva**, para no inventar una regla de dominio unilateralmente; se preserva el comportamiento actual del sistema.
+
+### Frontend
+
+`frontend/src/pages/Transportistas.tsx`: dos bloques nuevos, "Importar Choferes" e "Importar Vehículos", agregados como cards independientes junto a la card "Importar desde CSV" (Transportistas) ya existente de CAT-1 — mismo patrón visual y de estado (plantilla descargable, selector de archivo, botón "Importar" deshabilitado durante la carga, banner de resultado con detalle de filas rechazadas). Gateados respectivamente por `puedeGestionarChoferes` y `puedeGestionarTransportistas` (mismos flags de CRM-2, ya alineados con la matriz de roles real). No se tocó la estructura de cards expandibles por transportista ni las altas individuales existentes. Al finalizar, se reutiliza `cargar()` sin perder búsqueda, orden ni transportista expandido.
+
+### Pruebas
+
+Suites nuevas: `backend/src/catalogos/choferes.controller.importar.spec.ts` (22 tests), `backend/src/catalogos/vehiculos.controller.importar.spec.ts` (21 tests). Cubren, para ambos recursos: archivo vacío / solo encabezado / encabezado obligatorio ausente / encabezado duplicado, archivo válido, mezcla de filas válidas e inválidas, transportista inexistente, transportista de otra organización, duplicado en base y dentro del archivo (CUIL **y DNI** para Choferes; patente para Vehículos), límite de filas exacto permitido y +1 rechazado, `P2002` traducido a mensaje funcional, error inesperado con mensaje genérico (nunca `error.message` crudo), y resolución en una sola consulta batch. `transportistas.roles.spec.ts` se extendió (80 tests en el archivo) para cubrir `importar()` y `plantillaImportacion()` de Choferes/Vehículos bajo el `RolesGuard` real. `clientes.controller.importar.spec.ts` se ajustó (una prueba existente pasó a esperar el mensaje genérico en vez del `error.message` crudo, para reflejar el nuevo manejo seguro de errores aplicado también a CAT-1).
+
+**Resultado medido:** backend build limpio; Jest completo sin caché, **32 suites / 408 tests, todos verdes**; `npm run test:dev1` 14/14; frontend `tsc -b` + `vite build` limpios. Validación manual en entorno local (`localhost`, sin tocar Railway/producción) con dos CSV reales (`validacion-choferes.csv`, `validacion-vehiculos.csv`, carpeta temporal fuera de Git, eliminada al cierre): en ambos casos la primera fila se creó correctamente y la segunda (mismo CUIL / misma patente que la primera) se rechazó por duplicado dentro del archivo, con el resumen `total/creados/rechazados` correcto y sin regresiones visuales — validado por Luis.
+
+**Deuda remanente (backlog):**
+- Evaluar si conviene introducir normalización transversal de CUIT/CUIL/DNI/patente (mayúsculas, guiones, espacios) en un bloque de dominio independiente — hoy no existe en ningún punto del sistema, no solo en CAT-2.
+- Evaluar si el alta (individual y masiva) de Cliente/Transportista/Chofer/Vehículo debería generar `AuditLog` — hoy ninguna lo hace; es una decisión de auditoría de todo el catálogo, no específica de CAT-2.
+- `transportistas.controller.ts`/`clientes.controller.ts` no tienen detección proactiva en lote de CUIT duplicado (a diferencia de Choferes/Vehículos en CAT-2), aunque el schema sí tiene `@@unique([organizacionId, cuit])` en ambos modelos — un duplicado se sigue rechazando vía `P2002` (ya con mensaje seguro), solo sin la verificación previa en lote. Ampliar esto es una mejora futura, fuera del alcance de este cierre.
