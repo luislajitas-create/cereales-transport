@@ -1,3 +1,15 @@
+// DEV-1 — mecanismo estándar y mínimo de Nest para cargar variables locales (`dotenv/config`,
+// la misma librería que usa @nestjs/config internamente). Debe ser el primer import del
+// archivo: valida antes de importar AppModule (ver comentario de abajo), así que cualquier
+// carga de entorno tiene que ocurrir antes de esa línea, no después.
+//
+// Nunca afecta producción: dotenv.config() busca un archivo `.env` en el cwd del proceso — en
+// Railway ese archivo no existe (no se commitea, está en .gitignore, y el Dockerfile no lo
+// copia), así que la llamada no encuentra nada, no lanza, y no toca `process.env`. Las
+// variables productivas siguen llegando exclusivamente desde el entorno real (Railway).
+// Tampoco sobrescribe nada: si una variable ya está definida en el proceso (como pasa siempre
+// en producción), dotenv la deja como está — ver backend/src/config/env-validation.spec.ts.
+import "dotenv/config";
 import "reflect-metadata";
 import { validarEntorno } from "./config/env-validation";
 

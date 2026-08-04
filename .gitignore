@@ -9,6 +9,11 @@ build/
 # Env
 .env
 .env.*
+!.env.example
+
+# DEV-1: fixtures temporales de scripts/tests/dev1.test.js (se crean y se borran solos; esto
+# es red de seguridad por si un test se corta a mitad de camino)
+backend/.tmp-dev1-test-*/
 
 # Logs
 *.log

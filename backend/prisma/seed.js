@@ -12,6 +12,12 @@
 // IdentidadChoferGrupo.nombreReferencia, Ubicacion), por búsqueda explícita antes de crear.
 const { PrismaClient } = require("@prisma/client");
 const bcrypt = require("bcryptjs");
+// DEV-1 — protección obligatoria antes de cualquier escritura: aborta si DATABASE_URL no
+// apunta a localhost/127.0.0.1. Se llama acá (no solo desde el script de npm) para cubrir
+// cualquier forma de invocar el seed: `node prisma/seed.js`, `npm run prisma:seed` y
+// `npx prisma db seed` (que no pasa por los scripts de npm de este proyecto).
+const { asegurarDatabaseUrlLocal } = require("../scripts/asegurar-db-local");
+asegurarDatabaseUrlLocal();
 
 const prisma = new PrismaClient();
 

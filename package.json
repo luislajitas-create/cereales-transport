@@ -1,0 +1,12 @@
+{
+  "name": "sistema-dador-carga-cereales",
+  "private": true,
+  "scripts": {
+    "preflight": "node scripts/preflight.js",
+    "dev": "node scripts/dev.js",
+    "dev:backend": "npm --prefix backend run start:dev",
+    "dev:frontend": "npm --prefix frontend run dev",
+    "estado": "node scripts/estado.js",
+    "test:dev1": "node scripts/tests/dev1.test.js"
+  }
+}

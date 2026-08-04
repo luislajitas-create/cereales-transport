@@ -8,6 +8,7 @@
         "start:dev": "nest start --watch",
         "test": "jest",
         "prisma:generate": "prisma generate",
+        "preprisma:migrate": "node scripts/asegurar-db-local.js",
         "prisma:migrate": "prisma migrate deploy",
         "prisma:seed": "node prisma/seed.js"
     },
@@ -24,6 +25,7 @@
         "class-transformer": "^0.5.1",
         "class-validator": "^0.14.1",
         "cors": "^2.8.5",
+        "dotenv": "^16.4.5",
         "exceljs": "^4.4.0",
         "multer": "^2.2.0",
         "nodemailer": "^9.0.3",
