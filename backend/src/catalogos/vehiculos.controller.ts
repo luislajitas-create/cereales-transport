@@ -12,6 +12,7 @@ import { ORGANIZACION_PRISMA } from "../prisma/organizacion-prisma.token";
 import { OrganizacionPrismaClient } from "../prisma/organizacion-prisma.client";
 import { parsearCsv, filasComoObjetos, validarEncabezados, LIMITE_FILAS_IMPORTACION_CSV } from "../common/csv";
 import { mensajeErrorImportacion } from "../common/importacion-errores";
+import { normalizarCuit, normalizarPatente } from "../common/normalizacion";
 import { CreateVehiculoDto } from "./dto/create-vehiculo.dto";
 import { UpdateVehiculoDto } from "./dto/update-vehiculo.dto";
 
@@ -74,13 +75,16 @@ export class VehiculosController {
 
     const filas = filasComoObjetos(filasCrudas);
 
-    const cuitsDelArchivo = Array.from(new Set(filas.map((f) => (f.transportistaCuit || "").trim()).filter(Boolean)));
+    // CAT-3: normalizado (no solo .trim()) ANTES de armar las claves de consulta — el CUIT
+    // almacenado en Transportista ya es canónico (mismo DTO normalizado), así que la clave de
+    // búsqueda tiene que serlo también o un CSV con guiones nunca resolvería el transportista.
+    const cuitsDelArchivo = Array.from(new Set(filas.map((f) => normalizarCuit(f.transportistaCuit || "")).filter(Boolean)));
     const transportistas = cuitsDelArchivo.length
       ? await this.prisma.transportista.findMany({ where: { cuit: { in: cuitsDelArchivo } }, select: { id: true, cuit: true } })
       : [];
     const idPorCuit = new Map(transportistas.map((t) => [t.cuit, t.id]));
 
-    const patentesDelArchivo = Array.from(new Set(filas.map((f) => (f.patente || "").trim()).filter(Boolean)));
+    const patentesDelArchivo = Array.from(new Set(filas.map((f) => normalizarPatente(f.patente || "")).filter(Boolean)));
     const existentes = patentesDelArchivo.length
       ? await this.prisma.vehiculo.findMany({ where: { patente: { in: patentesDelArchivo } }, select: { patente: true } })
       : [];
@@ -93,7 +97,7 @@ export class VehiculosController {
       const numeroFila = i + 2;
       const registro = filas[i];
 
-      const cuitTransportista = (registro.transportistaCuit || "").trim();
+      const cuitTransportista = normalizarCuit(registro.transportistaCuit || "");
       if (!cuitTransportista) {
         detalle.push({ fila: numeroFila, ok: false, mensaje: "transportistaCuit es obligatorio." });
         continue;

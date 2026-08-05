@@ -243,7 +243,16 @@ export default function Transportistas() {
     .filter((t) => {
       const q = busqueda.trim().toLowerCase();
       if (!q) return true;
-      return t.razonSocial.toLowerCase().includes(q) || t.cuit.toLowerCase().includes(q);
+      // CAT-3: el backend guarda el CUIT normalizado (solo dígitos) desde este bloque en
+      // adelante — sin este agregado, buscar "30-12345678-9" (como lo escribe la mayoría de la
+      // gente) ya no encontraría nada, porque el valor guardado no tiene guiones. Se compara
+      // también dígito-a-dígito, sin reemplazar la comparación de texto original.
+      const qDigitos = q.replace(/\D/g, "");
+      return (
+        t.razonSocial.toLowerCase().includes(q) ||
+        t.cuit.toLowerCase().includes(q) ||
+        (qDigitos.length > 0 && t.cuit.replace(/\D/g, "").includes(qDigitos))
+      );
     })
     .sort((a, b) => {
       if (orden === "razonSocial") return a.razonSocial.localeCompare(b.razonSocial);

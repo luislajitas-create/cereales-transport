@@ -1,3 +1,4 @@
+import { Prisma } from "@prisma/client";
 import { ClientesController } from "./clientes.controller";
 import { OrganizacionPrismaClient } from "../prisma/organizacion-prisma.client";
 
@@ -19,11 +20,11 @@ describe("ClientesController.importar (CAT-1)", () => {
     await expect(controller.importar(undefined)).rejects.toThrow("Debe adjuntar un archivo CSV");
   });
 
-  it("crea todas las filas válidas y devuelve el resumen correcto", async () => {
+  it("crea todas las filas válidas, con el CUIT normalizado, y devuelve el resumen correcto", async () => {
     const crear = jest.fn().mockImplementation(({ data }) => Promise.resolve({ id: "x", ...data }));
     const controller = new ClientesController(crearPrismaMock({ crear }));
     const archivo = crearArchivo(
-      "razonSocial,cuit,condicionesComerciales\nCliente Uno,30-11111111-1,Contado\nCliente Dos,30-22222222-2,",
+      "razonSocial,cuit,condicionesComerciales\nCliente Uno,30-11111111-1,Contado\nCliente Dos,30.222.222.222,",
     );
 
     const resultado = await controller.importar(archivo);
@@ -33,12 +34,48 @@ describe("ClientesController.importar (CAT-1)", () => {
     expect(resultado.rechazados).toBe(0);
     expect(crear).toHaveBeenCalledTimes(2);
     expect(crear).toHaveBeenNthCalledWith(1, {
-      data: { razonSocial: "Cliente Uno", cuit: "30-11111111-1", condicionesComerciales: "Contado" },
+      data: { razonSocial: "Cliente Uno", cuit: "30111111111", condicionesComerciales: "Contado" },
+    });
+    expect(crear).toHaveBeenNthCalledWith(2, {
+      data: { razonSocial: "Cliente Dos", cuit: "30222222222", condicionesComerciales: null },
     });
     expect(resultado.detalle).toEqual([
       { fila: 2, ok: true, mensaje: "Creado correctamente." },
       { fila: 3, ok: true, mensaje: "Creado correctamente." },
     ]);
+  });
+
+  // CAT-3: Clientes/Transportistas (CAT-1) no tienen la arquitectura de detección proactiva en
+  // lote que sí tiene Choferes/Vehículos (CAT-2) — decisión documentada en AUDITORIA_CATALOGOS.md.
+  // El duplicado dentro del mismo archivo igual se detecta correctamente porque el procesamiento
+  // es secuencial: la primera fila crea el registro con el CUIT ya normalizado, la segunda choca
+  // contra la restricción real de la base (P2002) aunque haya usado un formato distinto — nunca
+  // se devuelve el mensaje crudo de Prisma, ver mensajeErrorImportacion.
+  it("detecta un CUIT duplicado DENTRO DEL ARCHIVO aunque las dos filas usen formatos distintos (vía la restricción real de la base)", async () => {
+    const crear = jest
+      .fn()
+      .mockImplementationOnce(({ data }) => Promise.resolve({ id: "x", ...data }))
+      .mockImplementationOnce(() =>
+        Promise.reject(
+          new Prisma.PrismaClientKnownRequestError("Unique constraint failed on the fields: (`cuit`)", {
+            code: "P2002",
+            clientVersion: "5.0.0",
+            meta: { target: ["cuit"] },
+          }),
+        ),
+      );
+    const controller = new ClientesController(crearPrismaMock({ crear }));
+    const archivo = crearArchivo(
+      "razonSocial,cuit\nCliente Uno,30-11111111-1\nCliente Uno Duplicado,30111111111",
+    );
+
+    const resultado = await controller.importar(archivo);
+
+    expect(resultado.creados).toBe(1);
+    expect(resultado.rechazados).toBe(1);
+    expect(resultado.detalle[0].ok).toBe(true);
+    expect(resultado.detalle[1].ok).toBe(false);
+    expect(resultado.detalle[1].mensaje).toBe("Ya existe un registro con este CUIT");
   });
 
   it("una fila inválida se reporta sin bloquear las filas válidas del mismo archivo", async () => {

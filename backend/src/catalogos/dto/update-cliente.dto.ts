@@ -1,12 +1,16 @@
 import { IsArray, IsBoolean, IsOptional, IsString, ValidateNested } from "class-validator";
-import { Type } from "class-transformer";
+import { Transform, Type } from "class-transformer";
 import { ContactoDto } from "./contacto.dto";
+import { normalizarCuit, siPresente } from "../../common/normalizacion";
 
 export class UpdateClienteDto {
   @IsOptional()
   @IsString()
   razonSocial?: string;
 
+  // CAT-3: normalizado (solo dígitos) antes de validar y de persistir. siPresente() deja pasar
+  // undefined intacto — un PATCH que no toca "cuit" no debe pisar el valor ya guardado.
+  @Transform(siPresente(normalizarCuit))
   @IsOptional()
   @IsString()
   cuit?: string;

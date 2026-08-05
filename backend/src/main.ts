@@ -21,8 +21,7 @@ validarEntorno();
 import { NestFactory } from "@nestjs/core";
 import { ValidationPipe } from "@nestjs/common";
 import { AppModule } from "./app.module";
-import { PrismaExceptionFilter } from "./common/filters/prisma-exception.filter";
-import { AllExceptionsFilter } from "./common/filters/all-exceptions.filter";
+import { registrarFiltrosGlobales } from "./common/filters/registrar-filtros-globales";
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
@@ -35,10 +34,10 @@ async function bootstrap() {
   app.getHttpAdapter().getInstance().set("trust proxy", 1);
   app.enableCors({ origin: process.env.CORS_ORIGIN, credentials: true });
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
-  // Orden importa: Nest usa el primer filtro cuyo @Catch() matchee. PrismaExceptionFilter
-  // (específico) va antes que AllExceptionsFilter (catch-all, A-04) para seguir resolviendo
-  // los errores de Prisma con su propio mapeo de status/mensaje.
-  app.useGlobalFilters(new PrismaExceptionFilter(), new AllExceptionsFilter());
+  // CAT-3: el orden de registro (contraintuitivo con la API de Nest) está documentado y probado
+  // en registrar-filtros-globales.ts / filtros-globales.e2e.spec.ts — no reordenar acá sin leer
+  // ese comentario primero.
+  registrarFiltrosGlobales(app);
   app.setGlobalPrefix("api/v1");
   const port = process.env.PORT || 3000;
   await app.listen(port, "0.0.0.0");

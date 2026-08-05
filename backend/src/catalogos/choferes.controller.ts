@@ -15,6 +15,7 @@ import { OrganizacionPrismaClient } from "../prisma/organizacion-prisma.client";
 import { encontrarOFallar } from "../common/encontrar-o-fallar";
 import { parsearCsv, filasComoObjetos, validarEncabezados, LIMITE_FILAS_IMPORTACION_CSV } from "../common/csv";
 import { mensajeErrorImportacion } from "../common/importacion-errores";
+import { normalizarCuit, normalizarCuil, normalizarDni } from "../common/normalizacion";
 import { CreateChoferDto } from "./dto/create-chofer.dto";
 import { UpdateChoferDto } from "./dto/update-chofer.dto";
 
@@ -91,7 +92,10 @@ export class ChoferesController {
     // Resolución en lote (CAT-2, rendimiento): una consulta para transportistas por CUIT, una
     // para choferes existentes por CUIL/DNI — nunca una consulta por fila. Ambas ya acotadas a la
     // organización activa por la extensión de aislamiento (Bloque 8.1.d).
-    const cuitsDelArchivo = Array.from(new Set(filas.map((f) => (f.transportistaCuit || "").trim()).filter(Boolean)));
+    // CAT-3: se normaliza (no solo .trim()) ANTES de armar las claves de consulta — el CUIT
+    // almacenado en Transportista ya es canónico (mismo DTO normalizado), así que la clave de
+    // búsqueda tiene que serlo también o un CSV con guiones nunca resolvería el transportista.
+    const cuitsDelArchivo = Array.from(new Set(filas.map((f) => normalizarCuit(f.transportistaCuit || "")).filter(Boolean)));
     const transportistas = cuitsDelArchivo.length
       ? await this.prisma.transportista.findMany({ where: { cuit: { in: cuitsDelArchivo } }, select: { id: true, cuit: true } })
       : [];
@@ -101,9 +105,9 @@ export class ChoferesController {
     // ambas se resuelven en UNA sola consulta batch (OR combinado, no dos consultas separadas).
     // DNI es opcional en el modelo (dni String?): solo se valida cuando la fila lo trae, porque
     // varios choferes sin DNI son válidos (NULL no colisiona consigo mismo en la restricción
-    // única de Postgres).
-    const cuilsDelArchivo = Array.from(new Set(filas.map((f) => (f.cuil || "").trim()).filter(Boolean)));
-    const dnisDelArchivo = Array.from(new Set(filas.map((f) => (f.dni || "").trim()).filter(Boolean)));
+    // única de Postgres). CAT-3: normalizado antes de armar la clave — mismo motivo que arriba.
+    const cuilsDelArchivo = Array.from(new Set(filas.map((f) => normalizarCuil(f.cuil || "")).filter(Boolean)));
+    const dnisDelArchivo = Array.from(new Set(filas.map((f) => normalizarDni(f.dni || "") || "").filter(Boolean)));
     const filtrosDuplicados: Array<Record<string, unknown>> = [];
     if (cuilsDelArchivo.length) filtrosDuplicados.push({ cuil: { in: cuilsDelArchivo } });
     if (dnisDelArchivo.length) filtrosDuplicados.push({ dni: { in: dnisDelArchivo } });
@@ -121,7 +125,7 @@ export class ChoferesController {
       const numeroFila = i + 2; // fila 1 es el encabezado
       const registro = filas[i];
 
-      const cuitTransportista = (registro.transportistaCuit || "").trim();
+      const cuitTransportista = normalizarCuit(registro.transportistaCuit || "");
       if (!cuitTransportista) {
         detalle.push({ fila: numeroFila, ok: false, mensaje: "transportistaCuit es obligatorio." });
         continue;

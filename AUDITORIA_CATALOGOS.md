@@ -109,7 +109,7 @@ Misma matriz que el alta individual (`create()`) de cada recurso — la importac
 - **Manejo seguro de errores de base de datos** (`backend/src/common/importacion-errores.ts`, nuevo): la base queda como última defensa ante condiciones de carrera (dos filas del archivo, o dos importaciones concurrentes, apuntando al mismo valor único) incluso después de la detección en lote + en memoria. `P2002` se traduce a un mensaje funcional por campo (reutilizando `mensajeUnico()`, extraída a `backend/src/common/prisma-mensajes.ts` para que la use también `PrismaExceptionFilter`, sin duplicar la lógica); otros códigos Prisma conocidos (`P2003`/`P2025`) devuelven un mensaje genérico de dominio. **Nunca se devuelve `error.message` crudo de Prisma/PostgreSQL al usuario** — para errores inesperados se devuelve un mensaje genérico fijo y solo se registra en el log del servidor el tipo de error, nunca el mensaje completo ni los datos de la fila (pueden contener información personal). Este mismo manejo (límite de filas + traducción segura de errores) se aplicó también a los importadores de CAT-1 (`transportistas.controller.ts`, `clientes.controller.ts`) para no dejarlos con un comportamiento más débil que CAT-2.
 - **Rendimiento:** resolución de transportistas y de duplicados en lote (una consulta cada una, nunca una por fila), verificado con pruebas dedicadas.
 - **Auditoría (AuditLog):** se confirmó que el alta individual de Chofer/Vehículo no genera `AuditLog` — la importación masiva sigue la misma política vigente y tampoco genera ninguno. No se amplió ni se rediseñó la Auditoría Administrativa (FAC-4).
-- **Normalización:** se auditó el sistema completo (backend y frontend) y se confirmó que **no existe hoy ninguna normalización** de CUIT/CUIL/DNI/patente (mayúsculas, guiones, espacios) en ningún punto — solo el `.trim()` genérico del parser CSV compartido. **Decisión explícita: CAT-2 no introdujo normalización nueva**, para no inventar una regla de dominio unilateralmente; se preserva el comportamiento actual del sistema.
+- **Normalización:** se auditó el sistema completo (backend y frontend) y se confirmó que **no existía entonces ninguna normalización** de CUIT/CUIL/DNI/patente (mayúsculas, guiones, espacios) en ningún punto — solo el `.trim()` genérico del parser CSV compartido. **Decisión explícita en CAT-2: no introducir normalización nueva** en ese momento, para no inventar una regla de dominio unilateralmente; quedó como deuda documentada y **se cerró en CAT-3** (ver esa sección más abajo — única entrada histórica de este punto, no se repite en la lista de deuda remanente de abajo).
 
 ### Frontend
 
@@ -122,6 +122,145 @@ Suites nuevas: `backend/src/catalogos/choferes.controller.importar.spec.ts` (22 
 **Resultado medido:** backend build limpio; Jest completo sin caché, **32 suites / 408 tests, todos verdes**; `npm run test:dev1` 14/14; frontend `tsc -b` + `vite build` limpios. Validación manual en entorno local (`localhost`, sin tocar Railway/producción) con dos CSV reales (`validacion-choferes.csv`, `validacion-vehiculos.csv`, carpeta temporal fuera de Git, eliminada al cierre): en ambos casos la primera fila se creó correctamente y la segunda (mismo CUIL / misma patente que la primera) se rechazó por duplicado dentro del archivo, con el resumen `total/creados/rechazados` correcto y sin regresiones visuales — validado por Luis.
 
 **Deuda remanente (backlog):**
-- Evaluar si conviene introducir normalización transversal de CUIT/CUIL/DNI/patente (mayúsculas, guiones, espacios) en un bloque de dominio independiente — hoy no existe en ningún punto del sistema, no solo en CAT-2.
 - Evaluar si el alta (individual y masiva) de Cliente/Transportista/Chofer/Vehículo debería generar `AuditLog` — hoy ninguna lo hace; es una decisión de auditoría de todo el catálogo, no específica de CAT-2.
 - `transportistas.controller.ts`/`clientes.controller.ts` no tienen detección proactiva en lote de CUIT duplicado (a diferencia de Choferes/Vehículos en CAT-2), aunque el schema sí tiene `@@unique([organizacionId, cuit])` en ambos modelos — un duplicado se sigue rechazando vía `P2002` (ya con mensaje seguro), solo sin la verificación previa en lote. Ampliar esto es una mejora futura, fuera del alcance de este cierre.
+
+---
+
+## CAT-3 — Normalización transversal de identificadores (CUIT, CUIL, DNI, patente)
+
+**Problema original:** el sistema solo aplicaba `.trim()` a CUIT/CUIL/DNI/patente. Dos valores semánticamente idénticos pero escritos distinto (`"30-12345678-9"` vs `"30123456789"` vs `"30.123.456.789"`; `"ab-123-cd"` vs `"AB123CD"`) no eran reconocidos como el mismo identificador — ni por las restricciones únicas de la base (que comparan el string tal cual), ni por la resolución de `transportistaCuit` en la importación CSV, ni por ninguna búsqueda. Esto permitía duplicados semánticos y podía hacer que un CSV con un formato distinto al ya guardado no encontrara el transportista correspondiente.
+
+### Política canónica
+
+Implementada en `backend/src/common/normalizacion.ts` (único punto de esta política en todo el backend):
+
+| Campo | Regla | Resultado de ejemplo |
+|---|---|---|
+| CUIT (Cliente, Transportista) / CUIL (Chofer) | Eliminar todo lo que no sea dígito | `"30-12345678-9"` → `"30123456789"` |
+| DNI (Chofer, opcional) | Eliminar todo lo que no sea dígito; si el resultado queda vacío, se guarda `null`/`undefined` — nunca `""` | `"30.111.222"` → `"30111222"`; `""` → `undefined` |
+| Patente (Vehículo) | `trim()` + mayúsculas + eliminar espacios/puntos/guiones | `"ab-123-cd"` → `"AB123CD"` |
+
+**Decisiones explícitas de alcance (no se ampliaron sin pedirlo):**
+- **No se valida ni corrige el dígito verificador fiscal de CUIT/CUIL.** `esCuitValido()` (`backend/src/common/cuit.ts`) ya existía y sigue sin aplicarse a Cliente/Transportista/Chofer — solo se usa en el alta de Organización. Agregarlo acá habría sido inventar una política fiscal nueva no pedida.
+- **No se restringen las patentes al formato Mercosur.** Se preservan formatos históricos (3+3, una sola letra de provincia, etc.) — la única transformación es mayúsculas + remoción de separadores.
+- **No se fusionan duplicados automáticamente**, ni en el alta/edición individual ni en la importación CSV ni en la migración de datos históricos: un duplicado semántico siempre se **rechaza** (fila de CSV, request HTTP, o migración completa), nunca se decide automáticamente qué registro conservar.
+- No se normalizó ningún otro campo (nombre, razón social, teléfono, licencia) ni ninguna otra entidad — **Organizacion.cuit y Productor.cuit quedan fuera de CAT-3** (el pedido fue explícitamente Clientes/Transportistas/Choferes/Vehículos).
+
+### Auditoría previa de colisiones (obligatoria antes de tocar código)
+
+Confirmado `DATABASE_URL` apuntando a `localhost` antes de cualquier consulta. Script de solo lectura (temporal, eliminado al terminar) contra la base local: agrupó cada entidad por `(organizacionId, valor normalizado)` y buscó grupos con más de un valor crudo distinto.
+
+**Resultado: 0 colisiones** sobre Cliente.cuit (6 filas), Transportista.cuit (3), Chofer.cuil (6), Chofer.dni (6), Vehiculo.patente (6) — ninguna organización tenía dos registros que fueran a colisionar al normalizar. No hizo falta detenerse ni informar colisiones (sección 1.5 del pedido).
+
+### Aplicación transversal
+
+Se resolvió con **un único punto de aplicación por capa**, sin reimplementar la normalización en cada controller:
+
+- **DTO (`@Transform(siPresente(normalizarX))`)** en `create-cliente.dto.ts`, `update-cliente.dto.ts`, `create-transportista.dto.ts`, `update-transportista.dto.ts`, `create-chofer.dto.ts` (cuil y dni), `update-chofer.dto.ts` (cuil y dni), `create-vehiculo.dto.ts`, `update-vehiculo.dto.ts`. `class-transformer` aplica `@Transform()` tanto en el `ValidationPipe` global (`transform: true`, altas/ediciones HTTP) como en `plainToInstance()` (usado directamente por los importadores CAT-1/CAT-2) — un solo cambio en el DTO alcanza para normalizar **alta, edición e importación CSV** de las cuatro entidades a la vez. `siPresente()` deja pasar `undefined`/`null` intactos: un `PATCH` que no envía el campo no lo pisa con `""`.
+- **Resolución de `transportistaCuit`** (Choferes/Vehículos, CAT-2): no pasa por ningún DTO — se agregó `normalizarCuit()` explícito en `choferes.controller.ts`/`vehiculos.controller.ts`, tanto en la consulta batch (`cuitsDelArchivo`) como en la resolución por fila, para que un CSV con o sin guiones resuelva siempre el mismo transportista.
+- **Detección de duplicados en lote** (CAT-2): las claves de las consultas batch (`cuilsDelArchivo`, `dnisDelArchivo`, `patentesDelArchivo`) pasaron de `.trim()` a los normalizadores reales — de lo contrario, dos filas del mismo archivo con formatos distintos no se habrían detectado como duplicadas entre sí antes de llegar a la base.
+- **Clientes/Transportistas (CAT-1):** sin arquitectura de detección proactiva en lote (deuda ya documentada en el cierre de CAT-2, no ampliada acá). El duplicado dentro del archivo y contra la base se sigue detectando correctamente porque el DTO ya normaliza antes de cada `create()` secuencial: la restricción real de la base (`P2002`) rechaza la segunda fila aunque use un formato distinto, con mensaje funcional (ver más abajo). Documentado como decisión explícita, no como omisión.
+- **Aislamiento multiempresa:** sin cambios — la comparación de duplicados sigue ocurriendo exclusivamente contra la restricción real `@@unique([organizacionId, campo])` y las consultas batch acotadas por la extensión de aislamiento (Bloque 8.1.d); el mismo valor normalizado es válido en dos organizaciones distintas, verificado con pruebas dedicadas para las cuatro entidades.
+
+### Bug preexistente encontrado y corregido durante la validación en vivo
+
+Validando manualmente se detectó que un duplicado real en el alta/edición individual (no en la importación CSV) devolvía **HTTP 500 genérico** en vez de 409 con mensaje funcional — reproducible con un duplicado de Cliente sin ninguna variación de formato, así que **no es un bug de CAT-3**, ya estaba roto. Causa raíz: NestJS invierte internamente el array de `useGlobalFilters(...)` antes de resolverlos (`node_modules/@nestjs/core/router/router-exception-filters.js`, `filters.reverse()`) — con `useGlobalFilters(new PrismaExceptionFilter(), new AllExceptionsFilter())`, el filtro que efectivamente se evalúa primero es el **último** pasado, no el primero: `AllExceptionsFilter` (catch-all) siempre ganaba y `PrismaExceptionFilter` nunca llegaba a ejecutarse para ningún error de Prisma, en ningún endpoint del sistema. La importación CSV no se veía afectada porque tiene su propio `try`/`catch` independiente de este filtro.
+
+**Fix (autorizado explícitamente por el usuario tras reportarlo):** el registro de los dos filtros globales se extrajo a `backend/src/common/filters/registrar-filtros-globales.ts` (única función que decide el orden, documentada en detalle ahí) y `main.ts` pasó a llamarla en vez de registrar los filtros inline — orden final: `app.useGlobalFilters(new AllExceptionsFilter(), new PrismaExceptionFilter())`. Verificado en vivo antes y después del fix: un `POST /clientes` duplicado pasó de `500 "Error interno del servidor"` a **`409 "Ya existe un registro con este CUIT"`** (mensaje ya sin `organizacionId`, ver "Corrección del mensaje" más abajo).
+
+**Prueba de regresión automatizada (no solo validación manual):** `backend/src/common/filters/filtros-globales.e2e.spec.ts` — levanta una aplicación Nest real y mínima (`Test.createTestingModule` + `app.listen(0)`), registra los filtros con la MISMA función `registrarFiltrosGlobales()` que usa `main.ts`, y hace peticiones HTTP reales (`fetch`) contra dos rutas de prueba que lanzan, respectivamente, un `Prisma.PrismaClientKnownRequestError` P2002 real y un `Error` común. Verifica: el P2002 responde `409` con `"Ya existe un registro con este CUIT"` y nunca contiene el mensaje interno de Prisma (`"Unique constraint failed"`) ni `"organizacionId"`; el error común sigue respondiendo `500 "Error interno del servidor"` sin exponer su mensaje real. **Confirmado que detecta la regresión:** revertir el orden dentro de `registrarFiltrosGlobales()` a `(PrismaExceptionFilter, AllExceptionsFilter)` hace fallar el primer test (`Expected: 409, Received: 500`) — verificado manualmente revirtiendo y restaurando el orden antes de cerrar este punto.
+
+### Corrección del mensaje de restricción compuesta
+
+`mensajeUnico()` (`backend/src/common/prisma-mensajes.ts`) recibe el `meta.target` de un P2002 real, que en este sistema **siempre** incluye `organizacionId` (todas las restricciones únicas reales son compuestas `@@unique([organizacionId, campo])`, unicidad por organización, nunca global — Bloque 8.1.d). Antes de este ajuste, el mensaje listaba `organizacionId` tal cual junto al campo comercial (`"Ya existe un registro con este organizacionId, CUIT"`) — un campo técnico de aislamiento que la persona usuaria no reconoce ni puede "corregir". Se agregó un conjunto `CAMPOS_TECNICOS = new Set(["organizacionId", "id"])` excluido centralmente antes de armar el mensaje — no se ocultan campos comerciales, solo estos dos técnicos.
+
+Ajuste adicional de cierre: el mapeo pasó de "campo → nombre legible" (`CAMPO_LEGIBLE`, con el artículo `"este"` fijo armado en `mensajeUnico()`) a `CAMPO_A_FRASE` — "campo → frase completa con el artículo correcto" (`"este CUIT"`, `"esta patente"`). Ningún controller decide el género a mano; es un único mapeo centralizado. Fallback seguro y genérico (`"Ya existe un registro con estos datos"`) en tres casos: no queda ningún campo comercial tras excluir los técnicos; queda más de uno (ninguna restricción real del sistema combina dos campos comerciales, así que no hay un artículo único que armar); o el campo no está en `CAMPO_A_FRASE` (nunca se expone un nombre de columna crudo ni se le adivina el género).
+
+| Restricción real | Mensaje antes del fix de `organizacionId` | Mensaje final |
+|---|---|---|
+| `[organizacionId, cuit]` (Cliente/Transportista) | *"...con este organizacionId, CUIT"* | **"Ya existe un registro con este CUIT"** |
+| `[organizacionId, cuil]` (Chofer) | *"...con este organizacionId, CUIL"* | **"Ya existe un registro con este CUIL"** |
+| `[organizacionId, dni]` (Chofer) | *"...con este organizacionId, DNI"* | **"Ya existe un registro con este DNI"** |
+| `[organizacionId, patente]` (Vehículo) | *"...con este organizacionId, patente"* | **"Ya existe un registro con esta patente"** |
+
+Pruebas dedicadas: `backend/src/common/prisma-mensajes.spec.ts` (10 tests) — las cuatro combinaciones de la tabla (incluido el género de "patente"), orden de campos indistinto, `target` como string único, campo comercial no mapeado (fallback genérico, ya no expone el nombre crudo), y los tres casos de fallback seguro (`target` vacío, compuesto únicamente por campos técnicos, o con más de un campo comercial reconocido).
+
+### Datos históricos y migración
+
+**Se concluyó que SÍ hacía falta una migración**, aunque la auditoría no encontró colisiones: sin ella, un Transportista/Chofer/Vehículo/Cliente ya existente con formato no canónico (ej. `Transportista.cuit = "30-10000000-2"`) habría quedado **irresoluble** para cualquier comparación contra un valor ya normalizado — por ejemplo, `transportistaCuit` en un CSV nunca habría encontrado ese transportista, sin importar qué formato usara el archivo, porque el valor guardado no sería canónico. No es una cuestión de duplicados, es de consistencia del propio dato ya persistido.
+
+**Migración:** `backend/prisma/migrations/20260804061709_normalizacion_transversal_identificadores_cat3/migration.sql`.
+
+**Atomicidad real — `BEGIN;`/`COMMIT;` explícitos.** Corrección de una afirmación anterior de esta misma sección: **Prisma Migrate, para PostgreSQL, NO envuelve automáticamente cada `migration.sql` en una transacción** — es opt-in, agregando `BEGIN`/`COMMIT` explícitos (confirmado por Prisma: https://www.prisma.io/blog/prisma-migrate-dx-primitives). Sin ese `BEGIN`/`COMMIT`, cada sentencia del archivo habría corrido en autocommit: una colisión detectada en un bloque posterior (ej. Vehiculo.patente, el último) NO habría revertido los `UPDATE` ya confirmados por los bloques anteriores (Cliente, Transportista, Chofer), dejando una normalización parcial. El archivo envuelve los cinco bloques completos entre `BEGIN;` (primera sentencia) y `COMMIT;` (última) — cualquier `RAISE EXCEPTION` no capturado deja la transacción en estado abortado, y ese `COMMIT;` final se traduce en un `ROLLBACK` completo de los cinco bloques, no solo del que falló.
+
+Por cada uno de los cinco campos (Cliente.cuit, Transportista.cuit, Chofer.cuil, Chofer.dni, Vehiculo.patente):
+1. Un bloque `DO $$ ... $$` verifica, agrupando por `(organizacionId, valor normalizado)`, que ninguna organización quede con dos filas colisionando — si encuentra una, hace `RAISE EXCEPTION`; nunca elige automáticamente qué registro conservar.
+2. Recién entonces, un `UPDATE` reescribe el campo a su forma canónica con `regexp_replace`/`upper`/`trim` — el DNI usa `NULLIF(..., '')` para preservar `NULL` en vez de guardar cadena vacía.
+
+**Prueba de regresión estática:** `backend/src/common/migracion-cat3-atomicidad.spec.ts` — lee el archivo real de la migración (no una copia) y confirma: `BEGIN;` es la primera sentencia y `COMMIT;` la última; hay exactamente un `BEGIN;` y un `COMMIT;` en todo el archivo (sin `COMMIT` intermedio); los cinco bloques `DO $$` y los cinco `UPDATE` quedan contenidos entre ambos; ninguna sentencia de código usa un comando incompatible con una transacción explícita (`CREATE INDEX CONCURRENTLY`, `ALTER TYPE ... ADD VALUE`, `VACUUM`, `CREATE`/`DROP DATABASE`, `ALTER SYSTEM`); y cada uno de los cinco campos mantiene su `RAISE EXCEPTION` antes de su propio `UPDATE`.
+
+**Prueba reproducible en una base Postgres local desechable** (no la base local principal, no producción): se creó una base temporal (`createdb`), se sembraron datos donde una colisión ocurre deliberadamente en el ÚLTIMO bloque (dos Vehículo con patente `"AB-123-CD"`/`"ab123cd"`, misma organización) después de que el PRIMER bloque (Cliente.cuit `"30-11111111-1"`, formato no canónico) ya habría aplicado su `UPDATE` dentro de la misma transacción. Se ejecutó `migration.sql` directamente con `psql -v ON_ERROR_STOP=1`: el bloque de Vehículo abortó exactamente como se esperaba (`ERROR: CAT-3: colision al normalizar Vehiculo.patente...`) y, consultando después, `Cliente.cuit` seguía siendo **`"30-11111111-1"`, sin ningún cambio** — la reversión fue completa, cero normalización parcial. Base temporal eliminada (`dropdb`) al terminar; la base local principal no fue tocada en ningún momento (confirmado antes y después: mismos 6/3/6/6 registros).
+
+**Reconciliación del checksum local:** la versión anterior de esta migración (sin `BEGIN`/`COMMIT`) ya estaba aplicada en la base local principal, con su checksum antiguo registrado en `_prisma_migrations`. Confirmado `DATABASE_URL = localhost` antes de tocar nada, se eliminó **únicamente** esa fila (`DELETE ... WHERE migration_name = '20260804061709_normalizacion_transversal_identificadores_cat3'`, 1 fila afectada — nunca se reseteó la tabla ni la base) y se volvió a registrar con `npx prisma migrate resolve --applied <nombre>`, que hace que Prisma recalcule el checksum a partir del archivo actual, sin re-ejecutar la migración (los datos locales ya estaban normalizados de la corrida anterior — confirmado antes y después: mismos 6 CUIT de Cliente, todos canónicos). `npx prisma migrate status` confirma `Database schema is up to date!` sin drift.
+
+Aplicada localmente con `npx prisma migrate deploy` y verificada con una consulta de solo lectura: los 5 campos, sobre las 27 filas existentes en ese momento, quedaron 100% canónicos, 0 problemas. `backend/prisma/seed.js` también se actualizó (normalización duplicada a propósito en JS plano, documentado en el propio archivo, porque el seed corre con `node` directo, fuera del build de TypeScript) para que un ambiente sembrado desde cero también quede canónico desde el primer momento, no solo el ya existente.
+
+*Hallazgo incidental, no relacionado con CAT-3:* al re-ejecutar el seed se detectó que "Cliente Demo A" en la organización principal tiene un CUIT que no coincide con el que generaría el seed actual (`sembrarCatalogoBase` con `cuitBase="10000000"`) — un desajuste de datos preexistente entre versiones del seed, no introducido ni corregido en este bloque. La fila duplicada que este re-seed generó se eliminó antes de cerrar la validación.
+
+### Pruebas incorporadas
+
+- **`backend/src/common/normalizacion.spec.ts`** (25 tests): cada normalizador con guiones/puntos/espacios/mayúsculas, idempotencia (aplicar dos veces da el mismo resultado), DNI vacío/solo-separadores → `undefined`, `siPresente()` con valor presente/`undefined`/`null`/no-string.
+- **`backend/src/catalogos/normalizacion-alta-edicion.spec.ts`** (34 tests): DTO (`plainToInstance` + `validate`, igual que el `ValidationPipe` real) para las 4 entidades, y un almacén Prisma-fake que simula la restricción única real de Postgres (incluida la semántica de que un `UPDATE` nunca colisiona con su propio valor anterior) — cubre, para Cliente/Transportista/Chofer/Vehículo: guarda el valor normalizado, rechaza un duplicado con formato distinto, edición no colisiona consigo misma, edición sí rechaza colisión con otro registro, aislamiento entre organizaciones. Incluye el bloque dedicado de edición de DNI (ver abajo).
+- **`backend/src/common/prisma-mensajes.spec.ts`** (10 tests, nuevo en este cierre): las cuatro restricciones compuestas reales sin `organizacionId` en el mensaje, y los dos fallbacks seguros.
+- **`backend/src/common/filters/filtros-globales.e2e.spec.ts`** (2 tests, nuevo en este cierre): regresión real de precedencia de filtros (ver arriba).
+- **`backend/src/common/migracion-cat3-atomicidad.spec.ts`** (12 tests, nuevo en este cierre): lee el archivo real de la migración y confirma `BEGIN;`/`COMMIT;` explícitos, sin `COMMIT` intermedio, los cinco bloques contenidos entre ambos, ningún comando incompatible con transacciones explícitas, y cada campo con su chequeo de colisión antes de su `UPDATE` (ver "Atomicidad real" arriba).
+- **Importadores CAT-1/CAT-2 actualizados** (`choferes.controller.importar.spec.ts` 24 tests, `vehiculos.controller.importar.spec.ts` 22, `clientes.controller.importar.spec.ts` 6, `transportistas.controller.importar.spec.ts` 4): se agregaron casos de CUIT/CUIL/patente con y sin guiones resolviendo al mismo registro, duplicado dentro del archivo con formatos distintos, y — para Clientes/Transportistas — un caso explícito de duplicado detectado vía la restricción real de la base (`P2002` → mensaje funcional) ya que esas dos importaciones no tienen detección proactiva en lote.
+
+### DNI vacío en edición: decisión y prueba
+
+Un `PATCH` de Chofer que **no envía** `dni` sigue sin tocar el valor guardado (Prisma ignora un campo `undefined` en `update()`). Un `PATCH` que **sí envía** `dni` vacío o compuesto solo por separadores (`""`, `" . - "`) es una intención explícita de **borrar el DNI**: `update-chofer.dto.ts` usa un transform dedicado (`normalizarDniEdicion()`, distinto de `siPresente(normalizarDni)` que usan el resto de los campos) que en ese caso normaliza a `null` — nunca a `undefined` — para que Prisma efectivamente limpie la columna en vez de dejarla sin cambios mientras el endpoint responde `200` como si hubiera aplicado el borrado pedido. El alta (`create-chofer.dto.ts`) no necesitó este ajuste: ahí no existe un valor previo que preservar, y `undefined`/vacío ya terminaba en `NULL` correctamente. Probado a nivel DTO y a nivel controller (verificando el `data` real que llega a `prisma.chofer.update()`) en `normalizacion-alta-edicion.spec.ts`.
+
+### Validación final
+
+- `npm run test:dev1`: 14/14 ✅
+- Backend build: limpio
+- Jest completo sin caché: **37 suites / 496 tests, todos verdes** (base CAT-2: 32 suites / 408 tests → **+5 suites, +88 tests**, medido, no estimado)
+- Frontend `tsc -b` + `vite build`: limpios
+- Migración aplicada y verificada en la base local (`localhost`)
+- Validación manual en vivo (backend, vía API local): alta de Chofer con CUIL/DNI con guiones y puntos → guardado canónico; alta de Vehículo con patente en minúsculas y guiones → guardado canónico (`"ac-999-zz"` → `"AC999ZZ"`); importación CSV de Vehículos con `transportistaCuit` con guiones → resolvió el transportista correctamente; duplicado exacto de Cliente → `409` **"Ya existe un registro con este CUIT"** (repetido tras la corrección del mensaje, sin `organizacionId`); duplicado con formato distinto → mismo resultado
+- **Validación manual visual en el navegador (los cuatro casos del checklist: Cliente, Transportista + búsqueda con otro formato, Chofer + borrado de DNI, Vehículo + duplicado de patente) — aprobada por Luis.**
+
+### Auditoría productiva de solo lectura (previa a decidir si se aplica la migración)
+
+Realizada manualmente por Luis directamente en Railway Database, **exclusivamente con `SELECT`** — sin mostrar variables ni secretos, sin ninguna escritura. Resultado agregado:
+
+| Campo | Total | Cambiarían de formato | Normalizan a vacío | Colisiones |
+|---|---:|---:|---:|---:|
+| Cliente.cuit | 2 | 2 | 0 | 0 |
+| Transportista.cuit | 2 | 2 | 0 | 0 |
+| Chofer.cuil | 4 | 4 | 0 | 0 |
+| Chofer.dni (no nulo) | 3 | 0 | 0 | 0 |
+| Vehiculo.patente | 3 | 0 | 0 | 0 |
+
+- **Migración `20260804061709_normalizacion_transversal_identificadores_cat3`: NO aplicada en producción** (0 filas coincidentes en `_prisma_migrations`).
+- **Restricciones únicas verificadas presentes**, exactamente las que la migración asume: `Cliente_organizacionId_cuit_key`, `Transportista_organizacionId_cuit_key`, `Chofer_organizacionId_cuil_key`, `Chofer_organizacionId_dni_key`, `Vehiculo_organizacionId_patente_key`.
+- **0 colisiones y 0 valores que normalizarían a cadena vacía** en los cinco campos, sobre los datos reales de producción — no hay ningún caso de aborto esperado con los datos actuales si se aplica la migración.
+- Producción fue **consultada exclusivamente con `SELECT`** durante esta auditoría — **nunca modificada**: no se ejecutó la migración, no se corrieron seeds, no se escribió ningún dato de negocio.
+- **Comparación de expresiones (auditoría vs. `migration.sql`):** las expresiones SQL de la migración (`regexp_replace(campo, '\D', '', 'g')` para CUIT/CUIL/DNI; `regexp_replace(upper(trim(both from patente)), '[\s.-]', '', 'g')` para patente) son equivalentes a los normalizadores de `backend/src/common/normalizacion.ts` (solo dígitos / mayúsculas sin separadores) — sin discrepancias. Cada chequeo de colisión (`DO $$ ... RAISE EXCEPTION ... END $$`) ocurre **antes** del `UPDATE` correspondiente en los cinco bloques, y los cinco bloques están envueltos entre `BEGIN;`/`COMMIT;` explícitos (ver "Atomicidad real" arriba — Prisma Migrate NO envuelve esto automáticamente para PostgreSQL). Una excepción no capturada dentro de un `DO $$ $$` deja la transacción abortada, y el `COMMIT;` final sobre una transacción abortada se traduce en `ROLLBACK` completo de los cinco bloques — nunca queda una migración parcialmente aplicada, verificado de forma reproducible en una base local desechable (ver arriba). El `UPDATE` de `Chofer.dni` no toca las filas ya `NULL` y convierte a `NULL` (vía `NULLIF(..., '')`) cualquier valor no nulo que normalice a cadena vacía — preserva la semántica documentada. Sin diferencias materiales encontradas.
+- Esta auditoría es de **diagnóstico únicamente — la migración no se aplicó a producción** en este cierre; producción fue consultada, nunca modificada.
+- **Flujo real de aplicación (no es un paso manual separado):** el `railway.json` del backend define `preDeployCommand: ["npx prisma migrate deploy"]`. Cuando se autorice el push de CAT-3 a `origin/main`, Railway va a reconstruir la imagen del backend y, **antes** de arrancar la nueva versión, va a ejecutar automáticamente `npx prisma migrate deploy` — eso es lo que aplica esta migración, no un comando manual aparte. Si la migración fallara, el deploy se detiene ahí (Railway no arranca la nueva versión del backend con una migración a medias) y no corresponde intentar ninguna reparación automática — habría que diagnosticar manualmente antes de reintentar.
+
+### Deuda operativa (no relacionada con CAT-3 — no mezclar)
+
+Durante la preparación de esta auditoría se intentó listar variables del servicio Postgres en Railway y, por un uso incorrecto del comando, se imprimió en la conversación un valor de contraseña. Verificado después: **ese valor no autentica** contra la base activa (falló la autenticación al probarlo directamente) — es una variable del servicio Postgres desincronizada respecto de la credencial realmente vigente, no la contraseña activa. El backend productivo fue confirmado sano (`/api/v1/health` → `200`, `database: connected`) sin ninguna rotación ni cambio de configuración. **El valor expuesto no se registra en ningún lugar de este repositorio.** Queda como deuda operativa **separada de CAT-3**: reconciliar las variables del servicio Postgres en Railway con la credencial realmente activa, en una ventana de mantenimiento propia.
+
+### Frontend
+
+`Clientes.tsx`/`Transportistas.tsx`: el filtro de búsqueda por CUIT ahora también compara dígito-a-dígito (además de la comparación de texto original) — sin este agregado, buscar `"30-12345678-9"` (como la mayoría de la gente lo escribe) no habría encontrado nada, porque el valor guardado ya no tiene guiones. No se tocó edición, orden, cards expandibles, ni el manejo de los inputs (siguen siendo controlados sin reformatear mientras el usuario escribe, para no romper el cursor) — la normalización ocurre en el backend al enviar, no en cada tecla. No existía ningún helper visual de formato de CUIT/CUIL previamente, así que no se agregó ninguno: los valores se muestran tal cual el backend los devuelve (canónicos, sin guiones).
+
+### Limitaciones y deuda remanente
+
+- `Organizacion.cuit` y `Productor.cuit` quedan **sin normalizar** — explícitamente fuera del pedido de CAT-3.
+- El desajuste de datos del seed ("Cliente Demo A", ver arriba) queda documentado pero sin corregir — no es un problema de normalización.
+- `AuditLog` en altas/ediciones y detección proactiva en lote de CUIT para Clientes/Transportistas siguen como deuda de CAT-2, sin cambios.

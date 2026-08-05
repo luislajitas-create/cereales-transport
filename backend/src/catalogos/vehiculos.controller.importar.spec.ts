@@ -3,9 +3,13 @@ import { VehiculosController } from "./vehiculos.controller";
 import { OrganizacionPrismaClient } from "../prisma/organizacion-prisma.client";
 import { LIMITE_FILAS_IMPORTACION_CSV } from "../common/csv";
 
-// CAT-2: mismo criterio que choferes.controller.importar.spec.ts — sin DB real, transportista y
-// duplicados (acá solo por patente: es la única restricción @@unique real de Vehiculo fuera de
-// id/organizacionId, confirmado en el schema) se resuelven con una consulta en lote cada uno.
+// CAT-2/CAT-3: mismo criterio que choferes.controller.importar.spec.ts — sin DB real,
+// transportista y duplicados (acá solo por patente: es la única restricción @@unique real de
+// Vehiculo fuera de id/organizacionId, confirmado en el schema) se resuelven con una consulta en
+// lote cada uno. Los datos "ya existentes" del mock están en formato CANÓNICO (mayúsculas, solo
+// dígitos donde aplica) — lo que una base real ya normalizada devolvería; las filas de los CSV de
+// cada test usan a propósito formatos "humanos" (guiones, minúsculas, espacios) para probar la
+// normalización de extremo a extremo.
 function crearArchivo(contenido: string): Express.Multer.File {
   return { buffer: Buffer.from(contenido, "utf-8") } as Express.Multer.File;
 }
@@ -17,7 +21,7 @@ function crearPrismaMock(
     crear?: jest.Mock;
   } = {},
 ) {
-  const transportistaFindMany = jest.fn().mockResolvedValue(opciones.transportistas ?? [{ id: "transp-1", cuit: "30-11111111-1" }]);
+  const transportistaFindMany = jest.fn().mockResolvedValue(opciones.transportistas ?? [{ id: "transp-1", cuit: "30111111111" }]);
   const vehiculoFindMany = jest.fn().mockResolvedValue(opciones.vehiculosExistentes ?? []);
   const crear = opciones.crear ?? jest.fn().mockImplementation(({ data }) => Promise.resolve({ id: "nuevo", ...data }));
   const prisma = {
@@ -27,7 +31,7 @@ function crearPrismaMock(
   return { prisma, transportistaFindMany, vehiculoFindMany, crear };
 }
 
-describe("VehiculosController.importar (CAT-2)", () => {
+describe("VehiculosController.importar (CAT-2/CAT-3)", () => {
   it("sin archivo adjunto, rechaza con BadRequestException", async () => {
     const { prisma } = crearPrismaMock();
     const controller = new VehiculosController(prisma);
@@ -69,12 +73,12 @@ describe("VehiculosController.importar (CAT-2)", () => {
     expect(crear).not.toHaveBeenCalled();
   });
 
-  it("archivo válido: crea todas las filas y devuelve el resumen correcto", async () => {
+  it("archivo válido: crea todas las filas, con la patente normalizada, y devuelve el resumen correcto", async () => {
     const { prisma, crear } = crearPrismaMock();
     const controller = new VehiculosController(prisma);
     const archivo = crearArchivo(
       "transportistaCuit,patente,marca,modelo,tipo,capacidadKg,vencimientoRto,vencimientoSeguro\n" +
-        "30-11111111-1,AB123CD,Mercedes-Benz,Actros,CAMION,28000,2027-03-01,2027-01-15\n" +
+        "30-11111111-1,ab-123-cd,Mercedes-Benz,Actros,CAMION,28000,2027-03-01,2027-01-15\n" +
         "30-11111111-1,XY987ZZ,,,ACOPLADO,,,",
     );
 
@@ -121,7 +125,7 @@ describe("VehiculosController.importar (CAT-2)", () => {
     expect(resultado.detalle[1]).toEqual({ fila: 3, ok: true, mensaje: "Creado correctamente." });
   });
 
-  it("transportista inexistente: la fila se rechaza con un mensaje claro, sin llamar a create", async () => {
+  it("transportista inexistente: la fila se rechaza con un mensaje claro (CUIT normalizado), sin llamar a create", async () => {
     const { prisma, crear } = crearPrismaMock({ transportistas: [] });
     const controller = new VehiculosController(prisma);
     const archivo = crearArchivo("transportistaCuit,patente,tipo\n30-99999999-9,AB123CD,CAMION");
@@ -130,7 +134,7 @@ describe("VehiculosController.importar (CAT-2)", () => {
 
     expect(resultado.creados).toBe(0);
     expect(resultado.rechazados).toBe(1);
-    expect(resultado.detalle[0].mensaje).toContain("No existe un transportista con CUIT '30-99999999-9'");
+    expect(resultado.detalle[0].mensaje).toContain("No existe un transportista con CUIT '30999999999'");
     expect(crear).not.toHaveBeenCalled();
   });
 
@@ -142,14 +146,27 @@ describe("VehiculosController.importar (CAT-2)", () => {
     const resultado = await controller.importar(archivo);
 
     expect(resultado.rechazados).toBe(1);
-    expect(resultado.detalle[0].mensaje).toContain("No existe un transportista con CUIT '30-77777777-7'");
+    expect(resultado.detalle[0].mensaje).toContain("No existe un transportista con CUIT '30777777777'");
     expect(crear).not.toHaveBeenCalled();
   });
 
-  it("patente duplicada en base: la fila se rechaza y no se llama a create", async () => {
+  it("CUIT del transportista resuelve igual con o sin guiones (mismo transportista, dos formatos)", async () => {
+    const { prisma, crear } = crearPrismaMock();
+    const controller = new VehiculosController(prisma);
+    const archivo = crearArchivo(
+      "transportistaCuit,patente,tipo\n30-11111111-1,AA111AA,CAMION\n30111111111,BB222BB,CAMION",
+    );
+
+    const resultado = await controller.importar(archivo);
+
+    expect(resultado.creados).toBe(2);
+    expect(resultado.rechazados).toBe(0);
+  });
+
+  it("patente duplicada en base aunque el CSV use otro formato que el guardado (minúsculas y guiones): la fila se rechaza", async () => {
     const { prisma, crear } = crearPrismaMock({ vehiculosExistentes: [{ patente: "AB123CD" }] });
     const controller = new VehiculosController(prisma);
-    const archivo = crearArchivo("transportistaCuit,patente,tipo\n30-11111111-1,AB123CD,CAMION");
+    const archivo = crearArchivo("transportistaCuit,patente,tipo\n30-11111111-1,ab-123-cd,CAMION");
 
     const resultado = await controller.importar(archivo);
 
@@ -158,11 +175,11 @@ describe("VehiculosController.importar (CAT-2)", () => {
     expect(crear).not.toHaveBeenCalled();
   });
 
-  it("patente duplicada dentro del archivo: solo la primera ocurrencia se crea, la segunda se rechaza", async () => {
+  it("patente duplicada dentro del archivo aunque las dos filas tengan formatos distintos: solo la primera ocurrencia se crea", async () => {
     const { prisma, crear } = crearPrismaMock();
     const controller = new VehiculosController(prisma);
     const archivo = crearArchivo(
-      "transportistaCuit,patente,tipo\n30-11111111-1,AB123CD,CAMION\n30-11111111-1,AB123CD,ACOPLADO",
+      "transportistaCuit,patente,tipo\n30-11111111-1,AB123CD,CAMION\n30-11111111-1,ab 123 cd,ACOPLADO",
     );
 
     const resultado = await controller.importar(archivo);
@@ -292,7 +309,7 @@ describe("VehiculosController.importar (CAT-2)", () => {
     expect(resultado.creados).toBe(1);
     expect(resultado.rechazados).toBe(1);
     expect(resultado.detalle[0].ok).toBe(false);
-    expect(resultado.detalle[0].mensaje).toBe("Ya existe un registro con este patente");
+    expect(resultado.detalle[0].mensaje).toBe("Ya existe un registro con esta patente");
     expect(resultado.detalle[0].mensaje).not.toContain("Unique constraint failed");
     expect(resultado.detalle[1].ok).toBe(true);
   });

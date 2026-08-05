@@ -21,6 +21,13 @@ asegurarDatabaseUrlLocal();
 
 const prisma = new PrismaClient();
 
+// CAT-3: mismas reglas que backend/src/common/normalizacion.ts — duplicadas acá a propósito
+// (no como TS) porque este script corre con `node prisma/seed.js` directo, fuera del build de
+// TypeScript, y no puede importar ese módulo. Cualquier cambio a la política de normalización
+// debe reflejarse en ambos lugares.
+const soloDigitos = (valor) => (valor || "").replace(/\D/g, "");
+const normalizarPatenteSeed = (valor) => (valor || "").trim().toUpperCase().replace(/[\s.-]/g, "");
+
 async function buscarOCrearOrganizacion(nombre, datos) {
   const existente = await prisma.organizacion.findFirst({ where: { nombre } });
   if (existente) return prisma.organizacion.update({ where: { id: existente.id }, data: datos });
@@ -50,11 +57,15 @@ async function buscarOCrearUbicacion(organizacionId, nombre, tipo, localidad) {
 // Transportista, Vehiculo, y el Chofer real de esta organización (todavía sin vincular a
 // IdentidadChoferGrupo, eso lo hace el llamador). Todo por clave única real de negocio, propia
 // de cada organización — nunca por una clave global que el schema no garantiza.
+// CAT-3: cuitBase/choferCuil/choferDni/patente se normalizan acá, en el único punto donde este
+// seed escribe esos campos — los parámetros de entrada (cuitBase, choferCuil, choferDni) siguen
+// aceptando el formato "humano" con guiones para que main() abajo quede legible, igual que
+// cualquier alta real vía formulario o CSV.
 async function sembrarCatalogoBase(organizacionId, sufijo, cuitBase, choferNombre, choferCuil, choferDni) {
   const cliente = await prisma.cliente.upsert({
-    where: { organizacionId_cuit: { organizacionId, cuit: `30-${cuitBase}-1` } },
+    where: { organizacionId_cuit: { organizacionId, cuit: soloDigitos(`30-${cuitBase}-1`) } },
     update: {},
-    create: { organizacionId, razonSocial: `Cliente Demo ${sufijo}`, cuit: `30-${cuitBase}-1` },
+    create: { organizacionId, razonSocial: `Cliente Demo ${sufijo}`, cuit: soloDigitos(`30-${cuitBase}-1`) },
   });
 
   const cereal = await prisma.cereal.upsert({
@@ -67,18 +78,18 @@ async function sembrarCatalogoBase(organizacionId, sufijo, cuitBase, choferNombr
   const destino = await buscarOCrearUbicacion(organizacionId, `Planta Demo ${sufijo}`, "PLANTA", "Rosario");
 
   const transportista = await prisma.transportista.upsert({
-    where: { organizacionId_cuit: { organizacionId, cuit: `30-${cuitBase}-2` } },
+    where: { organizacionId_cuit: { organizacionId, cuit: soloDigitos(`30-${cuitBase}-2`) } },
     update: {},
-    create: { organizacionId, razonSocial: `Transportista Demo ${sufijo}`, cuit: `30-${cuitBase}-2` },
+    create: { organizacionId, razonSocial: `Transportista Demo ${sufijo}`, cuit: soloDigitos(`30-${cuitBase}-2`) },
   });
 
   const vehiculo = await prisma.vehiculo.upsert({
-    where: { organizacionId_patente: { organizacionId, patente: `AA${cuitBase}A` } },
+    where: { organizacionId_patente: { organizacionId, patente: normalizarPatenteSeed(`AA${cuitBase}A`) } },
     update: {},
     create: {
       organizacionId,
       transportistaId: transportista.id,
-      patente: `AA${cuitBase}A`,
+      patente: normalizarPatenteSeed(`AA${cuitBase}A`),
       marca: "Scania",
       modelo: "R450",
       tipo: "CAMION",
@@ -86,15 +97,17 @@ async function sembrarCatalogoBase(organizacionId, sufijo, cuitBase, choferNombr
     },
   });
 
+  const cuilNormalizado = soloDigitos(choferCuil);
+  const dniNormalizado = soloDigitos(choferDni) || null;
   const chofer = await prisma.chofer.upsert({
-    where: { organizacionId_cuil: { organizacionId, cuil: choferCuil } },
+    where: { organizacionId_cuil: { organizacionId, cuil: cuilNormalizado } },
     update: {},
     create: {
       organizacionId,
       transportistaId: transportista.id,
       nombre: choferNombre,
-      dni: choferDni,
-      cuil: choferCuil,
+      dni: dniNormalizado,
+      cuil: cuilNormalizado,
       comisionPct: 10,
       licenciaNumero: `B${cuitBase}`,
     },
