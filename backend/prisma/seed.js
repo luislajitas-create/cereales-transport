@@ -28,9 +28,18 @@ const prisma = new PrismaClient();
 const soloDigitos = (valor) => (valor || "").replace(/\D/g, "");
 const normalizarPatenteSeed = (valor) => (valor || "").trim().toUpperCase().replace(/[\s.-]/g, "");
 
+// CAT-6: "cuit" se excluye deliberadamente de la actualización cuando la organización YA existe
+// — re-ejecutar el seed nunca debe pisar en silencio el CUIT de una organización ya sembrada
+// (podría haber sido editada manualmente después del primer seed, o coincidir con una de las que
+// el propio hallazgo de CAT-6 detectó con dígito verificador inválido en una base ya sembrada
+// antes de esta corrección). Sí se guarda en la creación inicial, para que una base nueva nazca
+// con el CUIT ficticio-pero-válido desde el primer momento.
 async function buscarOCrearOrganizacion(nombre, datos) {
   const existente = await prisma.organizacion.findFirst({ where: { nombre } });
-  if (existente) return prisma.organizacion.update({ where: { id: existente.id }, data: datos });
+  if (existente) {
+    const { cuit, ...datosSinCuit } = datos;
+    return prisma.organizacion.update({ where: { id: existente.id }, data: datosSinCuit });
+  }
   return prisma.organizacion.create({ data: { nombre, ...datos } });
 }
 
@@ -196,12 +205,21 @@ async function main() {
   // 1 y 5 — organización principal (reutiliza la que ya crea, en cada base nueva, la migración
   // de backfill 20260712025653_backfill_organizacion_etapa1 — nunca se crea una segunda con el
   // mismo nombre) y una segunda organización de prueba.
+  // CAT-6: cuit normalizado (soloDigitos) al escribir — Organizacion.cuit quedó fuera del
+  // alcance de CAT-3 y recién ahora entra en la política transversal de normalización. Los
+  // valores "30-10000000-1"/"30-20000000-2" que este seed usaba antes son ficticios pero
+  // matemáticamente INVÁLIDOS (dígito verificador incorrecto, confirmado por auditoría) — ahora
+  // que UpdateOrganizacionDto exige dígito verificador válido, se reemplazan por
+  // "30100000004"/"30200000001": mismo patrón reconocible de ceros, pero con el dígito
+  // verificador real correcto (esCuitValido() los acepta). buscarOCrearOrganizacion() nunca
+  // pisa el cuit de una organización ya sembrada (ver ahí), así que esto solo afecta bases
+  // nuevas — no corrige en silencio el cuit histórico de una base ya sembrada.
   const orgA = await buscarOCrearOrganizacion("Organización Principal", {
-    cuit: "30-10000000-1",
+    cuit: "30100000004",
     razonSocial: "Organización Principal S.A.",
   });
   const orgB = await buscarOCrearOrganizacion("Organización B - Grupo Económico", {
-    cuit: "30-20000000-2",
+    cuit: "30200000001",
     razonSocial: "Organización B S.A.",
   });
 

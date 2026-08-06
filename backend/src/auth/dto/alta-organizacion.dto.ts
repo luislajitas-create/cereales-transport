@@ -1,6 +1,7 @@
 import { Transform, Type } from "class-transformer";
 import { IsDefined, IsEmail, IsNotEmpty, IsOptional, IsString, Matches, MaxLength, MinLength, ValidateNested } from "class-validator";
 import { EsCuitValido } from "../../common/es-cuit-valido.decorator";
+import { normalizarCuit, siPresente } from "../../common/normalizacion";
 
 const recortar = ({ value }: { value: unknown }) => (typeof value === "string" ? value.trim() : value);
 
@@ -13,9 +14,13 @@ export class DatosOrganizacionAltaDto {
 
   // Decisión del Product Owner: CUIT obligatorio en este flujo (a diferencia de
   // UpdateOrganizacionDto, donde sigue siendo opcional para organizaciones ya existentes).
-  // Longitud + solo-números quedan cubiertos por el mismo regex; dígito verificador va aparte.
+  // CAT-6: se normaliza (solo dígitos, mismo criterio transversal de CAT-3) ANTES de validar —
+  // un CUIT escrito con guiones/puntos/espacios ya no se rechaza, se acepta y se guarda
+  // canónico. El regex de 11 dígitos y el dígito verificador (@EsCuitValido, exclusivo de este
+  // flujo, sin cambios) siguen aplicando sobre el valor YA normalizado.
+  @Transform(siPresente(normalizarCuit))
   @IsString()
-  @Matches(/^\d{11}$/, { message: "El CUIT debe tener exactamente 11 dígitos numéricos, sin guiones ni espacios." })
+  @Matches(/^\d{11}$/, { message: "El CUIT debe tener exactamente 11 dígitos numéricos." })
   @EsCuitValido()
   cuit: string;
 

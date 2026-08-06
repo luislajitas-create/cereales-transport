@@ -63,3 +63,20 @@ export function normalizarDniEdicion({ value }: { value: unknown }): unknown {
   const normalizado = normalizarDni(value);
   return normalizado === undefined ? null : normalizado;
 }
+
+// CAT-6: normalización de un CUIT OPCIONAL (Organizacion.cuit en edición; Productor.cuit en alta
+// y edición) — semántica deliberadamente distinta de normalizarDniEdicion de arriba. Ahí, un
+// valor compuesto solo por separadores (" . - ") se trata como intención de BORRAR el campo
+// (-> null). Acá, en cambio, un valor NO VACÍO que normaliza a cadena vacía (ej. "---", solo
+// separadores sin ningún dígito) debe RECHAZARSE, no convertirse en null en silencio — evita que
+// alguien que quiso escribir un CUIT real y lo tipeó mal termine con el campo "limpio" sin
+// darse cuenta. Por eso esta función NO colapsa a null cuando normalizarCuit() devuelve "" a
+// partir de un input no vacío: deja pasar esa cadena vacía tal cual para que @IsNotEmpty() la
+// rechace con un mensaje claro en el DTO que use este transform. Solo el valor verdaderamente
+// vacío ("", o compuesto solo por espacios) es la intención inequívoca de borrar -> null.
+export function normalizarCuitOpcional({ value }: { value: unknown }): unknown {
+  if (value === undefined || value === null) return value;
+  if (typeof value !== "string") return value;
+  if (value.trim() === "") return null;
+  return normalizarCuit(value);
+}

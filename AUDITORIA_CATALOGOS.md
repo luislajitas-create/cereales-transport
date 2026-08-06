@@ -475,4 +475,163 @@ Ejecutada por Luis contra la base local, con verificación en base después de c
 - El límite de 2000 filas (`LIMITE_FILAS_IMPORTACION_CSV`) y el límite de tamaño de archivo (2 MB) no cambiaron — siguen siendo los mismos de CAT-1/CAT-2.
 - La detección de duplicados sigue siendo por CUIT únicamente (la única restricción `@@unique` real de Cliente/Transportista además de `id`) — no se agregó ninguna otra clave.
 - No se implementó ningún mecanismo de reintento automático ante P2002 — la fila se rechaza y debe volver a importarse manualmente, mismo criterio que Choferes/Vehículos.
-- No se tocó la deuda de CAT-3 (`Organizacion.cuit`/`Productor.cuit` sin normalizar) ni la de CAT-4 (Transportista/Vehículo/filtros sin validación visual, teléfono de Chofer) — fuera de alcance de este bloque.
+- ~~No se tocó la deuda de CAT-3 (`Organizacion.cuit`/`Productor.cuit` sin normalizar)~~ — **cerrado por CAT-6** (ver sección abajo).
+- La deuda de CAT-4 (Transportista/Vehículo/filtros sin validación visual, teléfono de Chofer) sigue sin tocar — fuera de alcance de este bloque.
+
+## CAT-6 — Normalización integral de CUIT en Organización y Productor
+
+**Problema anterior:** CAT-3 normalizó CUIT/CUIL de Cliente/Transportista/Chofer y patente de Vehículo, dejando explícitamente fuera `Organizacion.cuit` y `Productor.cuit`. Ninguno de los dos se normalizaba en ningún punto de escritura, permitiendo duplicados semánticos por formato distinto.
+
+### Matriz Organización / Productor
+
+| | `Organizacion.cuit` | `Productor.cuit` |
+|---|---|---|
+| Schema | `String? @unique` — restricción **global** (Organizacion no tiene `organizacionId` propio, es la raíz del tenant) | `String?` + `@@unique([organizacionId, cuit])` — restricción **por organización**, mismo patrón que `Chofer.dni` |
+| Aislamiento | Manual (`where: { id: actor.organizacionId }` en cada endpoint) | Automático (modelo listado en `ORGANIZACIONAL_MODELS`, igual que Cliente/Transportista/Chofer/Vehículo) |
+| Punto de alta real | `AuthService.altaOrganizacion()` (único) | `ProductoresController.create()` |
+| Punto de edición real | `OrganizacionController.actualizar()` | `ProductoresController.update()` |
+| AuditLog | Ya existía (`organizacion_creada_selfservice`, `organizacion_editada`) — fuera de alcance ampliarlo | No existe — **fuera de alcance de CAT-6 agregarlo** (el pedido era normalización, no trazabilidad; ver "Deuda remanente") |
+
+### Decisión de producto consultada y resuelta
+
+`AltaOrganizacionDto.organizacion.cuit` tenía `@Matches(/^\d{11}$/)` — **rechazaba** cualquier CUIT con separadores en vez de normalizarlo (única excepción del sistema a la regla general), con un dígito verificador propio (`@EsCuitValido()`, decisión previa del PO, no tocada). Se consultó explícitamente y el usuario autorizó relajarlo: ahora normaliza (`@Transform(siPresente(normalizarCuit))`) **antes** del regex y del dígito verificador, que se mantienen sin cambios sobre el valor ya canónico.
+
+### Normalización
+
+Reutiliza `normalizarCuit()`/`siPresente()`/`EsCuitValido()` de CAT-3 sin duplicar regex ni reimplementar el dígito verificador. Se agregó **una** función nueva en `backend/src/common/normalizacion.ts`:
+
+- **`normalizarCuitOpcional()`** — para CUIT opcional (`Organizacion.cuit` en edición; `Productor.cuit` en alta y edición). Semántica **deliberadamente distinta** de `normalizarDniEdicion()` (CAT-3): ahí, un valor compuesto solo por separadores se trata como intención de borrar (`-> null`). Acá, solo el valor **verdaderamente vacío** (`""` o solo espacios) borra; un valor no vacío que normaliza a cadena vacía (ej. `"---"`) se deja pasar tal cual (sin colapsar a `null`) para que el validador de formato del DTO lo rechace explícitamente — evita que un CUIT mal tipeado "desaparezca" sin que la persona se dé cuenta.
+
+**Política final de validación matemática — distinta a propósito entre las dos entidades:**
+
+| | `Organizacion.cuit` (alta y edición) | `Productor.cuit` (alta y edición) |
+|---|---|---|
+| Normaliza (solo dígitos) | Sí | Sí |
+| Exige exactamente 11 dígitos | Sí (`@Matches(/^\d{11}$/)`) | No — cualquier cantidad de dígitos normalizados es válida |
+| Dígito verificador (`@EsCuitValido()`) | **Sí** | **No** |
+
+Organización conserva la validación matemática completa (ya la tenía en el alta desde antes de CAT-3; CAT-6 la extendió a la edición, que no la tenía). Productor solo normaliza formato y controla que no quede vacío — igual que Cliente/Transportista/Chofer en CAT-3, ninguno de los cuales valida dígito verificador. Es una decisión de producto explícita, no una inconsistencia: los dos catálogos siguen reglas distintas.
+
+| Caso | `Organizacion.cuit` (edición) | `Productor.cuit` (alta/edición) |
+|---|---|---|
+| Campo omitido | `undefined` — Prisma no lo toca | ídem |
+| `null` explícito | pasa intacto | ídem |
+| `""` o solo espacios | `null` (borra) | ídem |
+| Con guiones/puntos/espacios | normaliza, luego exige 11 dígitos + verificador | normaliza, sin exigir longitud ni verificador |
+| No vacío que normaliza a vacío (ej. `"---"`) | **rechazado** (400, no matchea 11 dígitos) | **rechazado** (400, `@IsNotEmpty()`) |
+| 10 o 12 dígitos | **rechazado** (400) | permitido (Productor no exige longitud) |
+| 11 dígitos, verificador incorrecto | **rechazado** (400) | permitido (Productor no valida verificador) |
+
+**Bug real corregido (no solo normalización):** `Organizacion.tsx` (frontend) enviaba `cuit: form.cuit || ""` en cada guardado — nunca `undefined`. Antes de CAT-6, `UpdateOrganizacionDto.cuit` no convertía `""` a `null`, así que dos organizaciones que dejaran el CUIT vacío habrían colisionado con P2002 al guardar la segunda (`""` = `""` en una restricción `@unique` global; `NULL` nunca colisiona consigo mismo). Auditado: **cero filas con `cuit = ''`** en la base local antes de aplicar la migración — el bug era real pero no se había manifestado todavía. **Corregido también en el frontend** (ver sección "Frontend" abajo) — la corrección no queda apoyada únicamente en el DTO.
+
+### Backend — archivos tocados
+
+- `backend/src/common/normalizacion.ts` — `normalizarCuitOpcional()` nueva.
+- `backend/src/auth/dto/alta-organizacion.dto.ts` — `@Transform(siPresente(normalizarCuit))` agregado al CUIT (obligatorio); regex y `@EsCuitValido()` sin cambios, ahora aplicados sobre el valor ya normalizado.
+- `backend/src/administracion/dto/update-organizacion.dto.ts` — pipeline completo agregado: `@Transform(normalizarCuitOpcional)` → `@Matches(/^\d{11}$/)` → `@EsCuitValido()`, con `@IsOptional()` cubriendo `undefined`/`null`, tipo `string | null`.
+- `backend/src/catalogos/dto/create-productor.dto.ts` / `update-productor.dto.ts` — `@Transform(normalizarCuitOpcional)` + `@IsNotEmpty()` (sin `@Matches` ni `@EsCuitValido()` — ver tabla de política arriba).
+
+`OrganizacionController.actualizar()`, `AuthService.altaOrganizacion()` y `ProductoresController` quedan sin cambios de código — ya recibían `body.cuit` y lo pasaban a Prisma/AuditLog tal cual; ahora ese valor ya llega canónico (y, para Organización, ya validado matemáticamente) por el `ValidationPipe` global, antes de que el código de negocio se ejecute.
+
+### Duplicados y mensajes
+
+Sin cambios de infraestructura: el filtro global (`PrismaExceptionFilter`, con el orden corregido en CAT-3) y `mensajeUnico()` ya traducían `cuit` → "este CUIT" de forma genérica por nombre de campo, sin distinguir entidad — funciona igual para Organizacion y Productor sin tocar `prisma-mensajes.ts`. `AuthService.altaOrganizacion()` ya tenía además una verificación proactiva (`findUnique` antes del `create`) que ahora compara valores ya normalizados, cerrando el hueco donde un CUIT con formato distinto al ya registrado se habría colado hasta el `create()` real.
+
+### AuditLog
+
+`Organizacion` ya auditaba (CAT-4 no la tocó, quedó fuera de su alcance) — confirmado que ambos eventos (`organizacion_creada_selfservice`, `organizacion_editada`) ahora guardan el CUIT ya canónico en `datosAnteriores`/`datosNuevos`, sin duplicar eventos ni alterar los nombres de acción existentes. `Productor` **no tenía AuditLog antes de CAT-6 y sigue sin tenerlo** — agregarlo es una ampliación de alcance real (trazabilidad, no normalización) que este bloque no pidió; queda documentado como deuda explícita.
+
+### Frontend
+
+Se auditaron las pantallas reales: `Organizacion.tsx` (Mi Organización, un único registro por sesión, sin búsqueda) y la pestaña "Productores" de `Catalogos.tsx` (lista + alta, **sin ningún campo de búsqueda/filtro** — a diferencia de `Clientes.tsx`/`Transportistas.tsx`, que sí lo tienen desde CAT-3). El selector de Productor en `ViajeForm.tsx` es un `<select>` nativo por nombre, nunca por CUIT. **No existe ninguna búsqueda por CUIT que corregir** para estas dos entidades — el requisito "comparar dígito a dígito" del pedido no tiene ningún punto de aplicación real hoy, y no se agregó ninguna pantalla ni función de búsqueda nueva (fuera de alcance: "no agregar pantallas nuevas").
+
+**`Organizacion.tsx` requirió tres correcciones sucesivas** en `guardar()`, cada una encontrada por la validación manual de este mismo bloque (no asumidas de antemano):
+
+1. **Bug original:** el payload se armaba con `form[c.name] || ""` para **todos** los campos, incluido `cuit` — nunca distinguía "el campo quedó vacío" de "no se tocó", así que el backend siempre recibía `cuit: ""` en vez de `null`.
+2. **Riesgo encontrado tras la corrección de (1) — organizaciones históricas bloqueadas para editar cualquier campo.** La corrección seguía enviando `cuit` en **cada** guardado (vacío → `null`, con contenido → el texto tal cual) — pero `UpdateOrganizacionDto.cuit` exige 11 dígitos + dígito verificador válido cuando el campo está presente. Una organización con CUIT histórico canónico pero matemáticamente inválido (nunca se validó el dígito verificador antes de CAT-6) quedaría sin poder editar ni el nombre. Auditoría de solo lectura sobre las 13 organizaciones locales confirmó el riesgo como real: **10 CUIT con dígito verificador válido, 3 inválidos** (0 nulos, 0 con longitud distinta de 11) — los dos CUIT demo del propio seed (`Organización Principal`, la organización de `admin@demo.com` usada en toda la validación de este bloque, y `Organización B`) están entre los 3 inválidos. Se introdujo `construirPayloadCuit()`: solo `cuit` se omitía cuando no cambiaba respecto del valor cargado.
+3. **Bug preexistente descubierto al validar (2) en vivo — "email must be an email" al editar solo el domicilio.** El resto de los campos (`nombre`, `razonSocial`, `domicilio`, `telefono`, `email`, `zonaHoraria`, `moneda`) seguía usando `form[c.name] || ""` sin la exclusión que ya tenía `cuit` — así que `email` (nunca cargado, `null` en la base de `admin@demo.com`) se reenviaba como `""` en **cualquier** guardado, aunque nadie lo hubiera tocado. `UpdateOrganizacionDto.email` tiene `@IsEmail()` además de `@IsOptional()`, y `@IsOptional()` de class-validator solo deja pasar `undefined`/`null` — nunca `""` — así que `@IsEmail()` rechazaba la cadena vacía con "email must be an email" en cada guardado que no tocara el email. Confirmado en base que el intento fallido no dejó ningún rastro (ni el domicilio temporal se guardó, ni se generó `AuditLog`) — la validación rechaza antes de que el controller llegue a ejecutarse. **Es un bug preexistente del sistema, no introducido por CAT-6** — simplemente nunca se había manifestado porque, hasta este bloque, nada dependía de que un campo opcional realmente quedara en `null` en vez de `""`.
+
+**Corrección final, integral y mínima:** se generalizó la lógica de `cuit` a los ocho campos editables, en un archivo nuevo sin JSX (`frontend/src/pages/organizacion-payload.ts`) para poder probarlo aislado del componente:
+- `construirValorCampo(nombreCampo, valorCargado, valorFormulario)` — sin cambios respecto del valor cargado → `undefined` (la clave queda completamente ausente del payload); vacío/solo espacios con un cambio real → `null` si el campo es *nullable* en el schema, o el texto vacío tal cual si es *obligatorio* (deja que el backend lo rechace con su propio mensaje, en vez de intentar guardar `null` en una columna que no lo admite); cualquier otro valor → tal cual lo escribió la persona usuaria, sin recortar ni reformatear.
+- `nombre` es el **único** campo obligatorio entre los editables de Organización (`Organizacion.nombre: String`, sin `?`, en `schema.prisma`) — el resto (`razonSocial`/`cuit`/`domicilio`/`telefono`/`email`/`zonaHoraria`/`moneda`) son `String?`. La política se derivó campo por campo del schema real, no se asumió.
+- `construirPayloadOrganizacion(nombresDeCampo, organizacionCargada, formulario)` arma el objeto final aplicando la función anterior a cada campo; las claves con valor `undefined` nunca se asignan al objeto (no solo se "filtran" después).
+- `Organizacion.tsx` ahora arma el payload completo con una sola llamada a `construirPayloadOrganizacion()` — sin ninguna rama especial para `cuit` en el componente; toda la lógica vive en el archivo puro.
+
+No se tocó `UpdateOrganizacionDto` en ninguna de las tres correcciones — la política de validación aprobada (normalizar, 11 dígitos, dígito verificador para `cuit`; `@IsEmail()` para `email`; etc.) se mantiene exactamente igual. Si el usuario vacía un `email` ya informado, ahora se envía `null` y se guarda; si escribe un email no vacío inválido, se sigue enviando y el backend lo sigue rechazando con 400.
+
+### Migración
+
+`backend/prisma/migrations/20260806185149_normalizacion_cuit_organizacion_productor_cat6/migration.sql` — nunca se editó CAT-3 ni ninguna migración ya aplicada.
+
+- Dos bloques `DO $$ ... $$` (Organizacion.cuit, Productor.cuit), cada uno con **dos** `RAISE EXCEPTION` antes de sus `UPDATE`: (1) colisión tras normalizar, respetando el alcance real de cada restricción (global para Organizacion, `(organizacionId, cuit)` para Productor); (2) un valor no nulo/no vacío que normalizaría a cadena vacía — política CAT-6: **abortar**, no limpiar en silencio (deliberadamente distinto del `Chofer.dni` de CAT-3, que sí limpiaba automáticamente).
+- `''` (cadena vacía literal, ya guardada por el bug de `UpdateOrganizacionDto` descripto arriba) pasa a `NULL` explícitamente — no es un caso inseguro, es la misma semántica que la nueva política del DTO.
+- Expresiones SQL equivalentes al normalizador TypeScript: `regexp_replace(cuit, '\D', '', 'g')`, mismo patrón que CAT-3.
+- Todo dentro de `BEGIN;`/`COMMIT;` explícitos (Prisma Migrate no envuelve esto automáticamente para PostgreSQL — mismo hallazgo que CAT-3).
+
+**Atomicidad demostrada de dos formas:**
+1. **Estática:** `backend/src/common/migracion-cat6-atomicidad.spec.ts` lee el archivo real y confirma `BEGIN;`/`COMMIT;` únicos, sin `COMMIT` intermedio, los dos bloques y los cuatro `UPDATE` contenidos entre ambos, y cada campo con sus dos `RAISE EXCEPTION` antes de sus propios `UPDATE`.
+2. **Reproducible, en una base Postgres local descartable** (nunca la base local principal): se sembraron dos Organizacion con formato no canónico (sin colisión entre sí) y dos Productor de la misma organización cuyo CUIT, en formatos distintos, normaliza al mismo valor — colisión deliberada en el **último** bloque. Se ejecutó `migration.sql` directo con `psql -v ON_ERROR_STOP=1`: el bloque de Productor abortó exactamente como se esperaba (`ERROR: CAT-6: colision al normalizar Productor.cuit...`), y consultando después, **`Organizacion.cuit` seguía con el formato original sin normalizar** — el `UPDATE` del primer bloque, que sí se había ejecutado, quedó completamente revertido. Base descartable eliminada al terminar.
+
+**Aplicada a la base local principal** (no a producción): auditoría previa de colisiones — 0 en Organizacion (13 filas, todas con CUIT no nulo), 0 en Productor (0 filas totales, tabla vacía en desarrollo) — sin riesgo, aplicada con `prisma migrate deploy`. Verificado después: los 13 CUIT de Organización quedaron canónicos.
+
+### Seed
+
+`backend/prisma/seed.js` tenía `Organizacion.cuit` hardcodeado con guiones (`"30-10000000-1"` / `"30-20000000-2"`) — la auditoría de dígito verificador (ver arriba) confirmó que, además de no canónicos, son **matemáticamente inválidos**. Reemplazados por `"30100000004"` / `"30200000001"`: mismo patrón reconocible de ceros, pero con el dígito verificador real correcto (`esCuitValido()` los acepta).
+
+**`buscarOCrearOrganizacion()` nunca pisa el CUIT de una organización que ya existe** — corregido explícitamente: si la organización ya fue sembrada antes, el `update()` excluye `cuit` de los datos que aplica (el resto de los campos, como `razonSocial`, se sigue actualizando igual que antes). Esto es deliberado: re-ejecutar el seed sobre una base ya sembrada nunca debe corregir en silencio un CUIT histórico — ni el nuevo valor válido ni ningún otro. Verificado en vivo: tras cambiar los valores del seed y re-ejecutarlo localmente, `Organización Principal`/`Organización B` **conservaron su CUIT histórico anterior** (`"30100000001"`/`"30200000002"`, los mismos matemáticamente inválidos que ya tenían) — el nuevo valor ficticio-pero-válido solo se aplicará la próxima vez que se cree una organización nueva desde cero (base nueva). Identidades, IDs, `admin@demo.com` y relaciones quedaron intactos; sin duplicados (13 organizaciones antes y después). No se sembró ningún Productor (el seed nunca creó ninguno). No se "corrigió" ningún CUIT histórico de forma automática, en el seed ni en la base — exactamente lo pedido.
+
+`Organizacion Validacion Sin Grupo` (tercera organización local con dígito verificador inválido, detectada por la auditoría) **no es parte del seed** — es un artefacto de una validación anterior, ajeno a este bloque; no se tocó.
+
+### Pruebas incorporadas (43 tests nuevos / 5 suites nuevas en Jest backend, + 13 tests nuevos con el runner nativo de Node en frontend, fuera del conteo de Jest)
+
+- **`common/normalizacion.spec.ts`** (+8 tests): `normalizarCuitOpcional` — normaliza con separadores, `undefined`/`null` intactos, `""`/espacios → `null`, valor no vacío que normaliza a vacío se deja pasar (no colapsa a `null`), valor no-string intacto, idempotencia.
+- **`auth/dto/alta-organizacion.dto.spec.ts`** (+2 tests): CUIT con guiones y con puntos/espacios ahora se acepta y normaliza (antes se rechazaba).
+- **`administracion/dto/update-organizacion.dto.spec.ts`** (nuevo, 10 tests): CUIT humano válido → canónico; CUIT canónico válido; longitud incorrecta (10 y 12 dígitos, dos tests); dígito verificador incorrecto (con `constraints.esCuitValido` explícito); `null`; `""`; solo espacios; omitido; solo separadores (rechazado, nunca colapsa a `null`).
+- **`catalogos/dto/productor.dto.spec.ts`** (nuevo, 8 tests): mismo patrón de omitido/`null`/vacío/normaliza para `CreateProductorDto`/`UpdateProductorDto`, sin longitud ni verificador (política distinta, ver tabla arriba).
+- **`administracion/organizacion.controller.actualizar.spec.ts`** (nuevo, 2 tests): AuditLog guarda el CUIT canónico en antes/después; un P2002 real se propaga sin modificar hacia el filtro global, sin generar AuditLog.
+- **`catalogos/simples.controller.productor.spec.ts`** (nuevo, 4 tests): `create()`/`update()` persisten el CUIT canónico; P2002 se propaga sin modificar; el mismo CUIT normalizado no es rechazado por el controller en dos organizaciones distintas (la exclusión real vive en la extensión/DB, ya probada en `organizacion-prisma.client.spec.ts` — esta prueba confirma que el controller no agrega ninguna comparación manual que pudiera romperlo).
+- **`common/migracion-cat6-atomicidad.spec.ts`** (nuevo, 9 tests): ver "Migración" arriba.
+- **Frontend — `frontend/src/pages/organizacion-payload.test.mjs`** (13 tests): sin instalar ningún framework de componentes — corre con el runner **nativo** de Node (`node:test`/`node:assert`, ambos módulos ya disponibles desde Node 18) vía `node --experimental-strip-types organizacion-payload.test.mjs`, ejecutado con **Node 24.18.0** (versión real de este entorno — `--experimental-strip-types`, a diferencia de `node:test`/`node:assert`, es un flag más reciente, no disponible en Node 18; borra los tipos de `organizacion-payload.ts` al vuelo, y el archivo fuente no tiene JSX, así que no hace falta ningún loader adicional). No está wireado a `npm run build` ni a CI — es una verificación puntual y documentada, no infraestructura nueva. Cubre exactamente los casos pedidos: cambiar solo domicilio → el payload contiene únicamente `domicilio`; email vacío sin cambios (nunca cargado) → `email` ausente, nunca `""`; email previamente informado que se borra → `null`; email inválido no vacío → se envía tal cual (el backend lo rechaza); CUIT histórico sin cambios → ausente; CUIT vacío/modificado → `null`/texto tal cual; nombre (único campo obligatorio) que se vacía → se envía vacío tal cual, nunca `null`; ningún campo opcional sin cambios se convierte en `""`. Comando y resultado (13/13 verdes) documentados acá para reproducibilidad. Cubierto además por `tsc -b`/`vite build` (limpios, incluida la exclusión del archivo `.test.mjs` del bundle de producción) y el plan de validación manual.
+
+Ningún test previo de CAT-1/CAT-2/CAT-3/CAT-4/CAT-5 se relajó ni se eliminó.
+
+### Validación
+
+- `npm run test:dev1`: 14/14 ✅
+- Backend build: limpio
+- `npx jest --no-cache`: **48 suites / 645 tests, todos verdes** (baseline original 43/602 + 5 suites/43 tests de CAT-6, reconciliado exacto — la corrección de compatibilidad histórica no agregó suites ni tests automatizados nuevos, ver "Frontend" y "Pruebas" arriba)
+- Frontend `tsc -b` + `vite build`: limpios (incluye ambas versiones de la corrección de `Organizacion.tsx`)
+- `git diff --check`: sin errores
+- Migración aplicada y verificada en la base local (`localhost`) — **no aplicada en producción, ni repetida ni editada en esta corrección**: el hallazgo de compatibilidad histórica no cambió el SQL de normalización, solo el frontend y el seed (el DTO tampoco se tocó — se mantiene la política de validación aprobada)
+- `npx prisma migrate status`: "Database schema is up to date!" — 24 migraciones encontradas, ninguna pendiente. `_prisma_migrations` confirma la fila de CAT-6 con `applied_steps_count: 1` y `rolled_back_at: null` — aplicada **exactamente una vez**, checksum coherente con el archivo en disco (si no coincidiera, `migrate status` lo reportaría como modificada).
+
+### Validación manual real (post-implementación, base local, organización real de `admin@demo.com`)
+
+Ejecutada en `Organización Principal` (una de las 3 organizaciones locales con CUIT canónico pero dígito verificador matemáticamente inválido, ver "Deuda remanente") y sobre un Productor temporal de la misma organización — nunca sobre datos ficticios aislados, a propósito, para probar el caso real de riesgo.
+
+- **Domicilio:** editado desde la UI a un valor temporal identificable y restaurado a `null` en un segundo guardado — en ambos casos el CUIT histórico permaneció intacto **byte a byte** y el email siguió en `null`, confirmando en la práctica que `construirPayloadOrganizacion()` omite `cuit` (y cualquier campo sin cambios) del PATCH.
+- **CUIT `---`:** intento de guardar rechazado con `400` y el mensaje funcional de `@Matches` ("El CUIT debe tener exactamente 11 dígitos numéricos."), sin ninguna escritura en base ni `AuditLog` nuevo — coherente con que la validación de `class-validator` rechaza el DTO antes de que el controller se ejecute.
+- **Productor — alta con separadores:** `20-12345678-6` se guardó normalizado a `20123456786` (solo dígitos).
+- **Productor — duplicado con formato distinto:** un segundo alta con el mismo CUIT como `20.123.45678-6` fue rechazado con `409` y el mensaje funcional *"Ya existe un registro con este CUIT"* (mismo `mensajeUnico()` de CAT-3, sin exponer detalles de Prisma/índice/organización), sin crear ningún registro.
+
+**Reconciliación exacta del `AuditLog` generado por esta validación** (para `Organización Principal`, `entidadId` fijo):
+- Antes de empezar: **0** eventos `AuditLog` para esta organización específica; **76** eventos en total en la base.
+- Se generaron exactamente **2** eventos `organizacion_editada`: (1) domicilio vacío → valor temporal; (2) domicilio temporal → `null`. Ambos con `cuit`/`email` presentes en el snapshot pero con el mismo valor a ambos lados (ver deuda de snapshot completo, abajo) — ningún cambio real ni dato ficticio en ninguno de los dos.
+- El intento de CUIT `---` y las dos operaciones de Productor **no generaron ningún evento** — Productor no audita (alcance documentado) y el intento de Organización fue rechazado antes de llegar al controller.
+- Después: **78** eventos en total en la base (76 + 2), **2** eventos para esta organización — reconciliación exacta, sin duplicados.
+
+**Limpieza final** (autorizada y ejecutada tras el cierre de la validación):
+- Productor temporal (`VALIDACION CAT6 TEMP - Productor`, CUIT `20123456786`) eliminado — verificado antes de borrar que no tenía ningún `Viaje` asociado.
+- El intento de duplicado nunca llegó a crearse — nada que limpiar ahí.
+- `Organización Principal` quedó exactamente en su estado previo a la validación: `domicilio: null`, CUIT histórico intacto, `email: null`.
+- Los 2 `AuditLog` generados por esta validación se conservan como evidencia (no se borran).
+- Todos los scripts de verificación/limpieza temporales (`backend/cat6_verificar_*.js`, `backend/cat6_limpiar_productor_temp.js`) y el archivo de estado previo (`cat6_estado_previo.json`, guardado fuera del repo, en el scratchpad de la sesión) fueron eliminados — ninguno llegó a este commit.
+
+### Deuda remanente
+
+- `Productor` sigue sin `AuditLog` — brecha real, pero de trazabilidad, no de normalización; agregarla es una ampliación de alcance explícita que CAT-6 no pidió.
+- La migración `20260806185149_normalizacion_cuit_organizacion_productor_cat6` está aplicada localmente pero **no en producción** — se aplicará automáticamente vía `preDeployCommand` de Railway (`npx prisma migrate deploy`) cuando se autorice el push de este bloque, igual que CAT-3.
+- Frontend sin infraestructura de tests de componentes (deuda preexistente, no introducida ni ampliada por CAT-6) — `construirValorCampo()`/`construirPayloadOrganizacion()` quedan cubiertas por revisión de función + `tsc -b`/`vite build` + los 13 tests nativos (`organizacion-payload.test.mjs`) + validación manual, no por un framework de tests de componentes.
+- **3 organizaciones locales con CUIT canónico pero dígito verificador matemáticamente inválido** (incluidas las dos organizaciones demo del seed histórico) — no se corrigieron automáticamente, por instrucción explícita. Quedan editables (nombre/domicilio/etc.) gracias a la corrección de `Organizacion.tsx`; corregir su CUIT específico, si hiciera falta, requiere una acción manual explícita desde la propia pantalla de Organización, no una migración ni un script.
+- La deuda de CAT-4 (Transportista/Vehículo/filtros sin validación visual, teléfono de Chofer) sigue sin tocar, sin relación con CAT-6.
+- **`AuditLog` de Organización audita el snapshot completo del registro (`datosAnteriores`/`datosNuevos` con las 9 columnas de `SELECT_ORGANIZACION`), no un diff de los campos realmente modificados** — comportamiento preexistente de `OrganizacionController.actualizar()` (Bloque 9.4, anterior a CAT-6), verificado durante la validación manual de CAT-6: al editar únicamente `domicilio`, el evento igual incluye `cuit`/`email` como claves (con el mismo valor a ambos lados, sin cambio real ni dato ficticio, solo no minimizado). CAT-6 no lo modificó por instrucción explícita ("no alterar acciones existentes"). Queda como deuda futura evaluar snapshots por diferencias (minimización), consistente con el patrón ya usado por CAT-4 en Cliente/Transportista/Chofer/Vehículo, que sí audita solo los campos cambiados.

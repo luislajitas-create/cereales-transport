@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { api } from "../api/client";
 import { useAuth } from "../context/AuthContext";
 import { useAsyncAction } from "../hooks/useAsyncAction";
+import { construirPayloadOrganizacion } from "./organizacion-payload";
 
 const CAMPOS = [
   { name: "nombre", label: "Nombre" },
@@ -36,8 +37,17 @@ export default function Organizacion() {
     e.preventDefault();
     run(
       async () => {
-        const payload: any = {};
-        CAMPOS.forEach((c) => { payload[c.name] = form[c.name] || ""; });
+        // CAT-6: cada campo se compara contra el valor YA CARGADO — un campo sin cambios queda
+        // completamente afuera del PATCH. Evita revalidar (y potencialmente rechazar) un campo
+        // que la persona usuaria ni tocó: un CUIT histórico con dígito verificador inválido, o un
+        // email opcional vacío que nunca se cargó (bug real encontrado por esta misma
+        // validación: antes se enviaba `email: ""` en cada guardado, y `@IsEmail()` lo rechazaba
+        // aunque nadie hubiera tocado el campo — ver organizacion-payload.ts).
+        const payload = construirPayloadOrganizacion(
+          CAMPOS.map((c) => c.name),
+          organizacion,
+          form,
+        );
         const { data } = await api.patch("/organizacion", payload);
         setOrganizacion(data);
         setForm(data);

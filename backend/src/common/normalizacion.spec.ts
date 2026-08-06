@@ -1,4 +1,4 @@
-import { normalizarCuit, normalizarCuil, normalizarDni, normalizarPatente, siPresente } from "./normalizacion";
+import { normalizarCuit, normalizarCuil, normalizarDni, normalizarPatente, siPresente, normalizarCuitOpcional } from "./normalizacion";
 
 describe("normalizarCuit / normalizarCuil", () => {
   it("elimina guiones", () => {
@@ -116,5 +116,43 @@ describe("siPresente", () => {
   it("deja pasar un valor no-string intacto (para que @IsString() reporte el error real)", () => {
     const transform = siPresente(normalizarCuit);
     expect(transform({ value: 12345 })).toBe(12345);
+  });
+});
+
+// CAT-6: transform para CUIT opcional (Organizacion.cuit en edición, Productor.cuit en alta y
+// edición) — semántica deliberadamente distinta de normalizarDniEdicion (ver el comentario en
+// normalizacion.ts): "" borra (-> null), pero un valor no vacío que normaliza a vacío se rechaza,
+// nunca se limpia en silencio.
+describe("normalizarCuitOpcional", () => {
+  it("normaliza un CUIT con guiones/puntos/espacios", () => {
+    expect(normalizarCuitOpcional({ value: "30-12345678-9" })).toBe("30123456789");
+  });
+
+  it("deja pasar undefined intacto (PATCH que no toca el campo)", () => {
+    expect(normalizarCuitOpcional({ value: undefined })).toBeUndefined();
+  });
+
+  it("deja pasar null intacto", () => {
+    expect(normalizarCuitOpcional({ value: null })).toBeNull();
+  });
+
+  it('"" (cadena vacía) es una intención explícita de borrar -> null', () => {
+    expect(normalizarCuitOpcional({ value: "" })).toBeNull();
+  });
+
+  it("solo espacios también es intención de borrar -> null", () => {
+    expect(normalizarCuitOpcional({ value: "   " })).toBeNull();
+  });
+
+  it("un valor NO vacío que normaliza a cadena vacía (solo separadores) NO se convierte en null — se deja pasar tal cual para que @IsNotEmpty() lo rechace", () => {
+    expect(normalizarCuitOpcional({ value: " . - " })).toBe("");
+  });
+
+  it("deja pasar un valor no-string intacto", () => {
+    expect(normalizarCuitOpcional({ value: 12345 })).toBe(12345);
+  });
+
+  it("un valor ya canónico queda igual (idempotencia)", () => {
+    expect(normalizarCuitOpcional({ value: "30123456789" })).toBe("30123456789");
   });
 });
