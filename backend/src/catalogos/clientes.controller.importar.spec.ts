@@ -2,22 +2,28 @@ import { Prisma } from "@prisma/client";
 import { ClientesController } from "./clientes.controller";
 import { OrganizacionPrismaClient } from "../prisma/organizacion-prisma.client";
 
+const ACTOR = { id: "user-1" };
+
 function crearArchivo(contenido: string): Express.Multer.File {
   return { buffer: Buffer.from(contenido, "utf-8") } as Express.Multer.File;
 }
 
+// CAT-4: importar() ahora crea cada fila dentro de $transaction(async (tx) => {...}) (entidad +
+// AuditLog atómicos por fila) — el mock expone un `tx` con cliente.create y auditLog.create, y
+// $transaction simplemente invoca el callback con ese `tx` (mismo criterio que
+// facturas.controller.registrar-cobranza.spec.ts).
 function crearPrismaMock(overrides: Partial<{ crear: jest.Mock }> = {}) {
+  const crear = overrides.crear ?? jest.fn().mockImplementation(({ data }) => Promise.resolve({ id: "nuevo", ...data }));
+  const tx = { cliente: { create: crear }, auditLog: { create: jest.fn().mockResolvedValue(undefined) } };
   return {
-    cliente: {
-      create: overrides.crear ?? jest.fn().mockImplementation(({ data }) => Promise.resolve({ id: "nuevo", ...data })),
-    },
+    $transaction: jest.fn((fn: any) => fn(tx)),
   } as unknown as OrganizacionPrismaClient;
 }
 
 describe("ClientesController.importar (CAT-1)", () => {
   it("sin archivo adjunto, rechaza con BadRequestException", async () => {
     const controller = new ClientesController(crearPrismaMock());
-    await expect(controller.importar(undefined)).rejects.toThrow("Debe adjuntar un archivo CSV");
+    await expect(controller.importar(undefined, ACTOR)).rejects.toThrow("Debe adjuntar un archivo CSV");
   });
 
   it("crea todas las filas válidas, con el CUIT normalizado, y devuelve el resumen correcto", async () => {
@@ -27,7 +33,7 @@ describe("ClientesController.importar (CAT-1)", () => {
       "razonSocial,cuit,condicionesComerciales\nCliente Uno,30-11111111-1,Contado\nCliente Dos,30.222.222.222,",
     );
 
-    const resultado = await controller.importar(archivo);
+    const resultado = await controller.importar(archivo, ACTOR);
 
     expect(resultado.total).toBe(2);
     expect(resultado.creados).toBe(2);
@@ -69,7 +75,7 @@ describe("ClientesController.importar (CAT-1)", () => {
       "razonSocial,cuit\nCliente Uno,30-11111111-1\nCliente Uno Duplicado,30111111111",
     );
 
-    const resultado = await controller.importar(archivo);
+    const resultado = await controller.importar(archivo, ACTOR);
 
     expect(resultado.creados).toBe(1);
     expect(resultado.rechazados).toBe(1);
@@ -84,7 +90,7 @@ describe("ClientesController.importar (CAT-1)", () => {
     // Fila 2: cuit vacío (inválida) — Fila 3: válida.
     const archivo = crearArchivo("razonSocial,cuit,condicionesComerciales\nCliente Sin CUIT,,\nCliente Dos,30-22222222-2,");
 
-    const resultado = await controller.importar(archivo);
+    const resultado = await controller.importar(archivo, ACTOR);
 
     expect(resultado.total).toBe(2);
     expect(resultado.creados).toBe(1);
@@ -103,7 +109,7 @@ describe("ClientesController.importar (CAT-1)", () => {
     const controller = new ClientesController(crearPrismaMock({ crear }));
     const archivo = crearArchivo("razonSocial,cuit\nCliente Uno,30-11111111-1\nCliente Dos,30-22222222-2");
 
-    const resultado = await controller.importar(archivo);
+    const resultado = await controller.importar(archivo, ACTOR);
 
     expect(resultado.creados).toBe(1);
     expect(resultado.rechazados).toBe(1);
@@ -114,7 +120,7 @@ describe("ClientesController.importar (CAT-1)", () => {
 
   it("archivo sin filas de datos (solo encabezado) rechaza con BadRequestException", async () => {
     const controller = new ClientesController(crearPrismaMock());
-    await expect(controller.importar(crearArchivo("razonSocial,cuit"))).rejects.toThrow(
+    await expect(controller.importar(crearArchivo("razonSocial,cuit"), ACTOR)).rejects.toThrow(
       "no tiene filas de datos",
     );
   });

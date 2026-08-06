@@ -8,11 +8,18 @@ import { validate } from "class-validator";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
 import { RolesGuard } from "../auth/roles.guard";
 import { Roles } from "../auth/roles.decorator";
+import { CurrentUser } from "../auth/current-user.decorator";
 import { ORGANIZACION_PRISMA } from "../prisma/organizacion-prisma.token";
 import { OrganizacionPrismaClient } from "../prisma/organizacion-prisma.client";
 import { encontrarOFallar } from "../common/encontrar-o-fallar";
 import { parsearCsv, filasComoObjetos, LIMITE_FILAS_IMPORTACION_CSV } from "../common/csv";
 import { mensajeErrorImportacion } from "../common/importacion-errores";
+import {
+  registrarAuditoria,
+  calcularCamposCambiados,
+  subconjunto,
+  marcarOrigenImportacionCsv,
+} from "../common/auditoria";
 import { CreateClienteDto } from "./dto/create-cliente.dto";
 import { UpdateClienteDto } from "./dto/update-cliente.dto";
 
@@ -24,6 +31,14 @@ function fmtMoney(n: number) {
 // dato plano de fila de CSV; se crea sin contactos, se agregan después individualmente si hace
 // falta). Encabezados exactos esperados en el CSV subido.
 const PLANTILLA_CLIENTES_CSV = 'razonSocial,cuit,condicionesComerciales\n"Cliente Ejemplo S.A.",30-12345678-9,"Pago a 30 días"\n';
+
+// CAT-4: entidad y allowlist de AuditLog. CUIT queda legible (identificador comercial, no
+// personal). organizacionId/id/contactos (relación anidada) quedan afuera a propósito — nunca se
+// serializa el objeto Prisma completo, ver AUDITORIA_CATALOGOS.md sección CAT-4.
+const ENTIDAD_CLIENTE = "Cliente";
+function snapshotCliente(c: { razonSocial: string; cuit: string; condicionesComerciales: string | null; activo: boolean }) {
+  return { razonSocial: c.razonSocial, cuit: c.cuit, condicionesComerciales: c.condicionesComerciales, activo: c.activo };
+}
 
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller("clientes")
@@ -60,7 +75,7 @@ export class ClientesController {
   @Roles("OPERACIONES", "FACTURACION", "ADMINISTRADOR")
   @Post("importar")
   @UseInterceptors(FileInterceptor("archivo", { limits: { fileSize: 2 * 1024 * 1024 } }))
-  async importar(@UploadedFile() archivo?: Express.Multer.File) {
+  async importar(@UploadedFile() archivo: Express.Multer.File | undefined, @CurrentUser() actor: any) {
     if (!archivo) throw new BadRequestException("Debe adjuntar un archivo CSV en el campo 'archivo'.");
     const filasCrudas = parsearCsv(archivo.buffer.toString("utf-8"));
     if (filasCrudas.length === 0) throw new BadRequestException("El archivo está vacío.");
@@ -90,8 +105,20 @@ export class ClientesController {
         continue;
       }
       try {
-        await this.prisma.cliente.create({
-          data: { razonSocial: dto.razonSocial, cuit: dto.cuit, condicionesComerciales: dto.condicionesComerciales || null },
+        // CAT-4: entidad + AuditLog atómicos por fila (nunca todo el archivo en una sola
+        // transacción) — si el auditLog.create() fallara, este create() también se revierte, y
+        // la fila queda como rechazada sin dejar un Cliente huérfano sin evento.
+        await this.prisma.$transaction(async (tx) => {
+          const creado = await tx.cliente.create({
+            data: { razonSocial: dto.razonSocial, cuit: dto.cuit, condicionesComerciales: dto.condicionesComerciales || null },
+          });
+          await registrarAuditoria(tx, {
+            usuarioId: actor.id,
+            entidad: ENTIDAD_CLIENTE,
+            entidadId: creado.id,
+            accion: "cliente_creado",
+            datosNuevos: marcarOrigenImportacionCsv(snapshotCliente(creado)),
+          });
         });
         creados++;
         detalle.push({ fila: numeroFila, ok: true, mensaje: "Creado correctamente." });
@@ -110,25 +137,84 @@ export class ClientesController {
 
   @Roles("OPERACIONES", "FACTURACION", "ADMINISTRADOR")
   @Post()
-  create(@Body() body: CreateClienteDto) {
+  create(@Body() body: CreateClienteDto, @CurrentUser() actor: any) {
     const { contactos, ...data } = body;
-    return this.prisma.cliente.create({
-      data: { ...data, contactos: contactos ? { create: contactos } : undefined },
-      include: { contactos: true },
+    return this.prisma.$transaction(async (tx) => {
+      const creado = await tx.cliente.create({
+        data: { ...data, contactos: contactos ? { create: contactos } : undefined },
+        include: { contactos: true },
+      });
+      await registrarAuditoria(tx, {
+        usuarioId: actor.id,
+        entidad: ENTIDAD_CLIENTE,
+        entidadId: creado.id,
+        accion: "cliente_creado",
+        datosNuevos: snapshotCliente(creado),
+      });
+      return creado;
     });
   }
 
   @Roles("OPERACIONES", "FACTURACION", "ADMINISTRADOR")
   @Patch(":id")
-  update(@Param("id") id: string, @Body() body: UpdateClienteDto) {
+  update(@Param("id") id: string, @Body() body: UpdateClienteDto, @CurrentUser() actor: any) {
     const { contactos, ...data } = body;
-    return this.prisma.cliente.update({ where: { id }, data });
+    return this.prisma.$transaction(async (tx) => {
+      const actual = encontrarOFallar(await tx.cliente.findUnique({ where: { id } }), "Cliente no encontrado.");
+      const actualizado = await tx.cliente.update({ where: { id }, data });
+
+      // CAT-4, sección 3: un PATCH que cambia "activo" Y otros campos genera dos eventos
+      // separados (estado + edición), ambos atómicos con el UPDATE en esta misma transacción.
+      // Ningún evento se genera si nada cambió realmente (PATCH idempotente).
+      const antes = snapshotCliente(actual);
+      const despues = snapshotCliente(actualizado);
+      const cambios = calcularCamposCambiados(antes, despues);
+      const cambioActivo = cambios.includes("activo");
+      const otrosCambios = cambios.filter((c) => c !== "activo");
+
+      if (cambioActivo) {
+        await registrarAuditoria(tx, {
+          usuarioId: actor.id,
+          entidad: ENTIDAD_CLIENTE,
+          entidadId: id,
+          accion: despues.activo ? "cliente_reactivado" : "cliente_desactivado",
+          datosAnteriores: { razonSocial: antes.razonSocial, activo: antes.activo },
+          datosNuevos: { razonSocial: despues.razonSocial, activo: despues.activo },
+        });
+      }
+      if (otrosCambios.length > 0) {
+        const claves = Array.from(new Set(["razonSocial", ...otrosCambios]));
+        await registrarAuditoria(tx, {
+          usuarioId: actor.id,
+          entidad: ENTIDAD_CLIENTE,
+          entidadId: id,
+          accion: "cliente_editado",
+          datosAnteriores: subconjunto(antes, claves),
+          datosNuevos: subconjunto(despues, claves),
+        });
+      }
+      return actualizado;
+    });
   }
 
   @Roles("OPERACIONES", "FACTURACION", "ADMINISTRADOR")
   @Delete(":id")
-  remove(@Param("id") id: string) {
-    return this.prisma.cliente.update({ where: { id }, data: { activo: false } });
+  remove(@Param("id") id: string, @CurrentUser() actor: any) {
+    return this.prisma.$transaction(async (tx) => {
+      const actual = encontrarOFallar(await tx.cliente.findUnique({ where: { id } }), "Cliente no encontrado.");
+      const actualizado = await tx.cliente.update({ where: { id }, data: { activo: false } });
+      if (actual.activo !== actualizado.activo) {
+        await registrarAuditoria(tx, {
+          usuarioId: actor.id,
+          entidad: ENTIDAD_CLIENTE,
+          entidadId: id,
+          accion: "cliente_desactivado",
+          datosAnteriores: { razonSocial: actual.razonSocial, activo: actual.activo },
+          datosNuevos: { razonSocial: actualizado.razonSocial, activo: actualizado.activo },
+        });
+      }
+      return actualizado;
+    });
   }
 
   @Get("export/excel")

@@ -8,11 +8,19 @@ import { validate } from "class-validator";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
 import { RolesGuard } from "../auth/roles.guard";
 import { Roles } from "../auth/roles.decorator";
+import { CurrentUser } from "../auth/current-user.decorator";
 import { ORGANIZACION_PRISMA } from "../prisma/organizacion-prisma.token";
 import { OrganizacionPrismaClient } from "../prisma/organizacion-prisma.client";
+import { encontrarOFallar } from "../common/encontrar-o-fallar";
 import { parsearCsv, filasComoObjetos, validarEncabezados, LIMITE_FILAS_IMPORTACION_CSV } from "../common/csv";
 import { mensajeErrorImportacion } from "../common/importacion-errores";
 import { normalizarCuit, normalizarPatente } from "../common/normalizacion";
+import {
+  registrarAuditoria,
+  calcularCamposCambiados,
+  subconjunto,
+  marcarOrigenImportacionCsv,
+} from "../common/auditoria";
 import { CreateVehiculoDto } from "./dto/create-vehiculo.dto";
 import { UpdateVehiculoDto } from "./dto/update-vehiculo.dto";
 
@@ -26,6 +34,33 @@ const PLANTILLA_VEHICULOS_CSV =
 // relación; patente y tipo son obligatorios en CreateVehiculoDto). Mismo criterio que Choferes:
 // se valida el encabezado antes de leer una sola fila.
 const ENCABEZADOS_OBLIGATORIOS_VEHICULOS = ["transportistaCuit", "patente", "tipo"];
+
+// CAT-4: entidad y allowlist de AuditLog. Patente queda legible (identificador comercial, no
+// personal) — Vehiculo no tiene ningún campo personal que enmascarar.
+const ENTIDAD_VEHICULO = "Vehiculo";
+function snapshotVehiculo(v: {
+  transportistaId: string;
+  patente: string;
+  marca: string | null;
+  modelo: string | null;
+  tipo: string;
+  capacidadKg: number | null;
+  vencimientoRto: Date | null;
+  vencimientoSeguro: Date | null;
+  activo: boolean;
+}) {
+  return {
+    transportistaId: v.transportistaId,
+    patente: v.patente,
+    marca: v.marca,
+    modelo: v.modelo,
+    tipo: v.tipo,
+    capacidadKg: v.capacidadKg,
+    vencimientoRto: v.vencimientoRto,
+    vencimientoSeguro: v.vencimientoSeguro,
+    activo: v.activo,
+  };
+}
 
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller("vehiculos")
@@ -48,13 +83,14 @@ export class VehiculosController {
   // CAT-2 (importación masiva de Vehículos): mismo criterio que ChoferesController.importar()
   // — ver comentario largo ahí (resolución de transportista por CUIT, aislamiento por
   // organización sin distinguir "inexistente" de "de otra organización", duplicados de patente
-  // en lote contra la base y dentro del archivo, sin AuditLog porque create() tampoco lo genera
-  // hoy). Solo cambia la clave de duplicado (patente en vez de CUIL) y los campos propios de
-  // Vehiculo (tipo, capacidadKg, vencimientos).
+  // en lote contra la base y dentro del archivo). Solo cambia la clave de duplicado (patente en
+  // vez de CUIL) y los campos propios de Vehiculo (tipo, capacidadKg, vencimientos). CAT-4: cada
+  // fila creada genera su propio AuditLog ("vehiculo_creado", origen "importacion_csv"), atómico
+  // con el create() de esa fila.
   @Roles("OPERACIONES", "ADMINISTRADOR")
   @Post("importar")
   @UseInterceptors(FileInterceptor("archivo", { limits: { fileSize: 2 * 1024 * 1024 } }))
-  async importar(@UploadedFile() archivo?: Express.Multer.File) {
+  async importar(@UploadedFile() archivo: Express.Multer.File | undefined, @CurrentUser() actor: any) {
     if (!archivo) throw new BadRequestException("Debe adjuntar un archivo CSV en el campo 'archivo'.");
     const filasCrudas = parsearCsv(archivo.buffer.toString("utf-8"));
     if (filasCrudas.length === 0) throw new BadRequestException("El archivo está vacío.");
@@ -140,17 +176,27 @@ export class VehiculosController {
       patentesVistasEnArchivo.add(dto.patente);
 
       try {
-        await this.prisma.vehiculo.create({
-          data: {
-            transportistaId: dto.transportistaId,
-            patente: dto.patente,
-            marca: dto.marca || null,
-            modelo: dto.modelo || null,
-            tipo: dto.tipo,
-            capacidadKg: dto.capacidadKg ?? undefined,
-            vencimientoRto: dto.vencimientoRto ? new Date(dto.vencimientoRto) : null,
-            vencimientoSeguro: dto.vencimientoSeguro ? new Date(dto.vencimientoSeguro) : null,
-          },
+        // CAT-4: entidad + AuditLog atómicos por fila — ver clientes.controller.ts.
+        await this.prisma.$transaction(async (tx) => {
+          const creado = await tx.vehiculo.create({
+            data: {
+              transportistaId: dto.transportistaId,
+              patente: dto.patente,
+              marca: dto.marca || null,
+              modelo: dto.modelo || null,
+              tipo: dto.tipo,
+              capacidadKg: dto.capacidadKg ?? undefined,
+              vencimientoRto: dto.vencimientoRto ? new Date(dto.vencimientoRto) : null,
+              vencimientoSeguro: dto.vencimientoSeguro ? new Date(dto.vencimientoSeguro) : null,
+            },
+          });
+          await registrarAuditoria(tx, {
+            usuarioId: actor.id,
+            entidad: ENTIDAD_VEHICULO,
+            entidadId: creado.id,
+            accion: "vehiculo_creado",
+            datosNuevos: marcarOrigenImportacionCsv(snapshotVehiculo(creado)),
+          });
         });
         creados++;
         detalle.push({ fila: numeroFila, ok: true, mensaje: "Creado correctamente." });
@@ -177,19 +223,75 @@ export class VehiculosController {
 
   @Roles("OPERACIONES", "ADMINISTRADOR")
   @Post()
-  create(@Body() body: CreateVehiculoDto) {
-    return this.prisma.vehiculo.create({ data: body });
+  create(@Body() body: CreateVehiculoDto, @CurrentUser() actor: any) {
+    return this.prisma.$transaction(async (tx) => {
+      const creado = await tx.vehiculo.create({ data: body });
+      await registrarAuditoria(tx, {
+        usuarioId: actor.id,
+        entidad: ENTIDAD_VEHICULO,
+        entidadId: creado.id,
+        accion: "vehiculo_creado",
+        datosNuevos: snapshotVehiculo(creado),
+      });
+      return creado;
+    });
   }
 
   @Roles("OPERACIONES", "ADMINISTRADOR")
   @Patch(":id")
-  update(@Param("id") id: string, @Body() body: UpdateVehiculoDto) {
-    return this.prisma.vehiculo.update({ where: { id }, data: body });
+  update(@Param("id") id: string, @Body() body: UpdateVehiculoDto, @CurrentUser() actor: any) {
+    return this.prisma.$transaction(async (tx) => {
+      const actual = encontrarOFallar(await tx.vehiculo.findUnique({ where: { id } }), "Vehículo no encontrado.");
+      const actualizado = await tx.vehiculo.update({ where: { id }, data: body });
+
+      const antes = snapshotVehiculo(actual);
+      const despues = snapshotVehiculo(actualizado);
+      const cambios = calcularCamposCambiados(antes, despues);
+      const cambioActivo = cambios.includes("activo");
+      const otrosCambios = cambios.filter((c) => c !== "activo");
+
+      if (cambioActivo) {
+        await registrarAuditoria(tx, {
+          usuarioId: actor.id,
+          entidad: ENTIDAD_VEHICULO,
+          entidadId: id,
+          accion: despues.activo ? "vehiculo_reactivado" : "vehiculo_desactivado",
+          datosAnteriores: { patente: antes.patente, activo: antes.activo },
+          datosNuevos: { patente: despues.patente, activo: despues.activo },
+        });
+      }
+      if (otrosCambios.length > 0) {
+        const claves = Array.from(new Set(["patente", ...otrosCambios]));
+        await registrarAuditoria(tx, {
+          usuarioId: actor.id,
+          entidad: ENTIDAD_VEHICULO,
+          entidadId: id,
+          accion: "vehiculo_editado",
+          datosAnteriores: subconjunto(antes, claves),
+          datosNuevos: subconjunto(despues, claves),
+        });
+      }
+      return actualizado;
+    });
   }
 
   @Roles("OPERACIONES", "ADMINISTRADOR")
   @Delete(":id")
-  remove(@Param("id") id: string) {
-    return this.prisma.vehiculo.update({ where: { id }, data: { activo: false } });
+  remove(@Param("id") id: string, @CurrentUser() actor: any) {
+    return this.prisma.$transaction(async (tx) => {
+      const actual = encontrarOFallar(await tx.vehiculo.findUnique({ where: { id } }), "Vehículo no encontrado.");
+      const actualizado = await tx.vehiculo.update({ where: { id }, data: { activo: false } });
+      if (actual.activo !== actualizado.activo) {
+        await registrarAuditoria(tx, {
+          usuarioId: actor.id,
+          entidad: ENTIDAD_VEHICULO,
+          entidadId: id,
+          accion: "vehiculo_desactivado",
+          datosAnteriores: { patente: actual.patente, activo: actual.activo },
+          datosNuevos: { patente: actualizado.patente, activo: actualizado.activo },
+        });
+      }
+      return actualizado;
+    });
   }
 }

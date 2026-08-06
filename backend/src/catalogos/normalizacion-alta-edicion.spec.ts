@@ -27,6 +27,13 @@ import { UpdateVehiculoDto } from "./dto/update-vehiculo.dto";
 //      "guarda normalizado / rechaza duplicado con formato distinto / no colisiona consigo misma
 //      en edición / sí rechaza colisión con otro registro / aísla por organización" son ciertos
 //      de punta a punta, sin necesitar una base real.
+//
+// CAT-4: create()/update() ahora corren dentro de $transaction(async (tx) => {...}) (mutación +
+// AuditLog atómicos) — el fake de abajo expone un `tx` con findUnique/create/update/auditLog.create
+// y un $transaction que simplemente invoca el callback con ese `tx`, mismo criterio que
+// facturas.controller.registrar-cobranza.spec.ts (FAC-4).
+
+const ACTOR = { id: "user-1" };
 
 describe("CAT-3 — DTO: normalización antes de validar y persistir", () => {
   it("CreateClienteDto normaliza cuit con guiones y valida OK", async () => {
@@ -102,7 +109,8 @@ describe("CAT-3 — DTO: normalización antes de validar y persistir", () => {
 // rechazan con el mismo error P2002 que dispara la base real si, DESPUÉS del cambio, otra fila
 // de la misma organización terminara con el mismo valor. update() excluye la propia fila de la
 // comparación — un UPDATE que deja el campo en su propio valor actual nunca colisiona consigo
-// mismo, exactamente como en SQL real.
+// mismo, exactamente como en SQL real. findUnique/auditLog.create se agregan para CAT-4 (el
+// update() real hace un findUnique antes del update, para poder armar el "antes" del AuditLog).
 function crearAlmacenConRestriccionUnica(campo: string) {
   const filas: Record<string, any>[] = [];
   let contador = 0;
@@ -125,7 +133,7 @@ function crearAlmacenConRestriccionUnica(campo: string) {
   const create = jest.fn(async ({ data }: { data: Record<string, any> }) => {
     lanzarSiColisiona(null, data.organizacionId, data[campo]);
     contador++;
-    const nueva = { id: `id-${contador}`, ...data };
+    const nueva = { id: `id-${contador}`, activo: true, ...data };
     filas.push(nueva);
     return nueva;
   });
@@ -136,16 +144,31 @@ function crearAlmacenConRestriccionUnica(campo: string) {
     const valorFinal = data[campo] !== undefined ? data[campo] : existente[campo];
     lanzarSiColisiona(existente.id, existente.organizacionId, valorFinal);
     Object.assign(existente, data);
-    return existente;
+    return { ...existente };
   });
 
-  return { filas, create, update };
+  const findUnique = jest.fn(async ({ where }: { where: { id: string } }) => {
+    const existente = filas.find((f) => f.id === where.id);
+    return existente ? { ...existente } : null;
+  });
+
+  const auditLog = { create: jest.fn().mockResolvedValue(undefined) };
+
+  return { filas, create, update, findUnique, auditLog };
+}
+
+function crearPrismaConTx(almacen: ReturnType<typeof crearAlmacenConRestriccionUnica>, modelo: string) {
+  const tx: Record<string, any> = {
+    [modelo]: { create: almacen.create, update: almacen.update, findUnique: almacen.findUnique },
+    auditLog: almacen.auditLog,
+  };
+  return { $transaction: jest.fn((fn: any) => fn(tx)) } as unknown as OrganizacionPrismaClient;
 }
 
 describe("CAT-3 — Cliente: alta/edición individual con normalización + restricción única real", () => {
   function crearControlador() {
     const almacen = crearAlmacenConRestriccionUnica("cuit");
-    const prisma = { cliente: { create: almacen.create, update: almacen.update } } as unknown as OrganizacionPrismaClient;
+    const prisma = crearPrismaConTx(almacen, "cliente");
     return { controller: new ClientesController(prisma), almacen };
   }
 
@@ -153,43 +176,44 @@ describe("CAT-3 — Cliente: alta/edición individual con normalización + restr
     const { controller, almacen } = crearControlador();
     await controller.create(
       plainToInstance(CreateClienteDto, { organizacionId: "org-1", razonSocial: "X", cuit: "30-11111111-1" } as any),
+      ACTOR,
     );
     expect(almacen.filas[0].cuit).toBe("30111111111");
   });
 
   it("rechaza un duplicado escrito con formato diferente al ya guardado", async () => {
     const { controller } = crearControlador();
-    await controller.create(plainToInstance(CreateClienteDto, { organizacionId: "org-1", razonSocial: "X", cuit: "30-11111111-1" } as any));
+    await controller.create(plainToInstance(CreateClienteDto, { organizacionId: "org-1", razonSocial: "X", cuit: "30-11111111-1" } as any), ACTOR);
     await expect(
-      controller.create(plainToInstance(CreateClienteDto, { organizacionId: "org-1", razonSocial: "Y", cuit: "30.111.111.111" } as any)),
+      controller.create(plainToInstance(CreateClienteDto, { organizacionId: "org-1", razonSocial: "Y", cuit: "30.111.111.111" } as any), ACTOR),
     ).rejects.toBeInstanceOf(Prisma.PrismaClientKnownRequestError);
   });
 
   it("en edición, el propio registro no colisiona consigo mismo aunque se reenvíe en otro formato", async () => {
     const { controller, almacen } = crearControlador();
-    await controller.create(plainToInstance(CreateClienteDto, { organizacionId: "org-1", razonSocial: "X", cuit: "30-11111111-1" } as any));
+    await controller.create(plainToInstance(CreateClienteDto, { organizacionId: "org-1", razonSocial: "X", cuit: "30-11111111-1" } as any), ACTOR);
     const id = almacen.filas[0].id;
     await expect(
-      controller.update(id, plainToInstance(UpdateClienteDto, { cuit: "30.111.111.111" } as any)),
+      controller.update(id, plainToInstance(UpdateClienteDto, { cuit: "30.111.111.111" } as any), ACTOR),
     ).resolves.toBeDefined();
     expect(almacen.filas[0].cuit).toBe("30111111111");
   });
 
   it("en edición, sí rechaza colisión con otro registro de la misma organización", async () => {
     const { controller, almacen } = crearControlador();
-    await controller.create(plainToInstance(CreateClienteDto, { organizacionId: "org-1", razonSocial: "A", cuit: "30-11111111-1" } as any));
-    await controller.create(plainToInstance(CreateClienteDto, { organizacionId: "org-1", razonSocial: "B", cuit: "30-22222222-2" } as any));
+    await controller.create(plainToInstance(CreateClienteDto, { organizacionId: "org-1", razonSocial: "A", cuit: "30-11111111-1" } as any), ACTOR);
+    await controller.create(plainToInstance(CreateClienteDto, { organizacionId: "org-1", razonSocial: "B", cuit: "30-22222222-2" } as any), ACTOR);
     const idB = almacen.filas[1].id;
     await expect(
-      controller.update(idB, plainToInstance(UpdateClienteDto, { cuit: "30-11111111-1" } as any)),
+      controller.update(idB, plainToInstance(UpdateClienteDto, { cuit: "30-11111111-1" } as any), ACTOR),
     ).rejects.toBeInstanceOf(Prisma.PrismaClientKnownRequestError);
   });
 
   it("el mismo CUIT normalizado es válido en dos organizaciones distintas (aislamiento preservado)", async () => {
     const { controller, almacen } = crearControlador();
-    await controller.create(plainToInstance(CreateClienteDto, { organizacionId: "org-1", razonSocial: "A", cuit: "30-11111111-1" } as any));
+    await controller.create(plainToInstance(CreateClienteDto, { organizacionId: "org-1", razonSocial: "A", cuit: "30-11111111-1" } as any), ACTOR);
     await expect(
-      controller.create(plainToInstance(CreateClienteDto, { organizacionId: "org-2", razonSocial: "A en otra org", cuit: "30-11111111-1" } as any)),
+      controller.create(plainToInstance(CreateClienteDto, { organizacionId: "org-2", razonSocial: "A en otra org", cuit: "30-11111111-1" } as any), ACTOR),
     ).resolves.toBeDefined();
     expect(almacen.filas).toHaveLength(2);
   });
@@ -198,48 +222,48 @@ describe("CAT-3 — Cliente: alta/edición individual con normalización + restr
 describe("CAT-3 — Transportista: alta/edición individual con normalización + restricción única real", () => {
   function crearControlador() {
     const almacen = crearAlmacenConRestriccionUnica("cuit");
-    const prisma = { transportista: { create: almacen.create, update: almacen.update } } as unknown as OrganizacionPrismaClient;
+    const prisma = crearPrismaConTx(almacen, "transportista");
     return { controller: new TransportistasController(prisma), almacen };
   }
 
   it("guarda el CUIT normalizado", async () => {
     const { controller, almacen } = crearControlador();
-    await controller.create(plainToInstance(CreateTransportistaDto, { organizacionId: "org-1", razonSocial: "X", cuit: "30-11111111-1" } as any));
+    await controller.create(plainToInstance(CreateTransportistaDto, { organizacionId: "org-1", razonSocial: "X", cuit: "30-11111111-1" } as any), ACTOR);
     expect(almacen.filas[0].cuit).toBe("30111111111");
   });
 
   it("rechaza un duplicado escrito con formato diferente al ya guardado", async () => {
     const { controller } = crearControlador();
-    await controller.create(plainToInstance(CreateTransportistaDto, { organizacionId: "org-1", razonSocial: "X", cuit: "30-11111111-1" } as any));
+    await controller.create(plainToInstance(CreateTransportistaDto, { organizacionId: "org-1", razonSocial: "X", cuit: "30-11111111-1" } as any), ACTOR);
     await expect(
-      controller.create(plainToInstance(CreateTransportistaDto, { organizacionId: "org-1", razonSocial: "Y", cuit: "30.111.111.111" } as any)),
+      controller.create(plainToInstance(CreateTransportistaDto, { organizacionId: "org-1", razonSocial: "Y", cuit: "30.111.111.111" } as any), ACTOR),
     ).rejects.toBeInstanceOf(Prisma.PrismaClientKnownRequestError);
   });
 
   it("en edición, el propio registro no colisiona consigo mismo aunque se reenvíe en otro formato", async () => {
     const { controller, almacen } = crearControlador();
-    await controller.create(plainToInstance(CreateTransportistaDto, { organizacionId: "org-1", razonSocial: "X", cuit: "30-11111111-1" } as any));
+    await controller.create(plainToInstance(CreateTransportistaDto, { organizacionId: "org-1", razonSocial: "X", cuit: "30-11111111-1" } as any), ACTOR);
     const id = almacen.filas[0].id;
     await expect(
-      controller.update(id, plainToInstance(UpdateTransportistaDto, { cuit: "30.111.111.111" } as any)),
+      controller.update(id, plainToInstance(UpdateTransportistaDto, { cuit: "30.111.111.111" } as any), ACTOR),
     ).resolves.toBeDefined();
   });
 
   it("en edición, sí rechaza colisión con otro registro de la misma organización", async () => {
     const { controller, almacen } = crearControlador();
-    await controller.create(plainToInstance(CreateTransportistaDto, { organizacionId: "org-1", razonSocial: "A", cuit: "30-11111111-1" } as any));
-    await controller.create(plainToInstance(CreateTransportistaDto, { organizacionId: "org-1", razonSocial: "B", cuit: "30-22222222-2" } as any));
+    await controller.create(plainToInstance(CreateTransportistaDto, { organizacionId: "org-1", razonSocial: "A", cuit: "30-11111111-1" } as any), ACTOR);
+    await controller.create(plainToInstance(CreateTransportistaDto, { organizacionId: "org-1", razonSocial: "B", cuit: "30-22222222-2" } as any), ACTOR);
     const idB = almacen.filas[1].id;
     await expect(
-      controller.update(idB, plainToInstance(UpdateTransportistaDto, { cuit: "30-11111111-1" } as any)),
+      controller.update(idB, plainToInstance(UpdateTransportistaDto, { cuit: "30-11111111-1" } as any), ACTOR),
     ).rejects.toBeInstanceOf(Prisma.PrismaClientKnownRequestError);
   });
 
   it("el mismo CUIT normalizado es válido en dos organizaciones distintas (aislamiento preservado)", async () => {
     const { controller, almacen } = crearControlador();
-    await controller.create(plainToInstance(CreateTransportistaDto, { organizacionId: "org-1", razonSocial: "A", cuit: "30-11111111-1" } as any));
+    await controller.create(plainToInstance(CreateTransportistaDto, { organizacionId: "org-1", razonSocial: "A", cuit: "30-11111111-1" } as any), ACTOR);
     await expect(
-      controller.create(plainToInstance(CreateTransportistaDto, { organizacionId: "org-2", razonSocial: "A en otra org", cuit: "30-11111111-1" } as any)),
+      controller.create(plainToInstance(CreateTransportistaDto, { organizacionId: "org-2", razonSocial: "A en otra org", cuit: "30-11111111-1" } as any), ACTOR),
     ).resolves.toBeDefined();
     expect(almacen.filas).toHaveLength(2);
   });
@@ -248,7 +272,7 @@ describe("CAT-3 — Transportista: alta/edición individual con normalización +
 describe("CAT-3 — Chofer: alta/edición individual con normalización + restricción única real (CUIL)", () => {
   function crearControlador() {
     const almacen = crearAlmacenConRestriccionUnica("cuil");
-    const prisma = { chofer: { create: almacen.create, update: almacen.update } } as unknown as OrganizacionPrismaClient;
+    const prisma = crearPrismaConTx(almacen, "chofer");
     return { controller: new ChoferesController(prisma), almacen };
   }
 
@@ -256,6 +280,7 @@ describe("CAT-3 — Chofer: alta/edición individual con normalización + restri
     const { controller, almacen } = crearControlador();
     await controller.create(
       plainToInstance(CreateChoferDto, { organizacionId: "org-1", transportistaId: "t1", nombre: "Juan", cuil: "20-30123456-4" } as any),
+      ACTOR,
     );
     expect(almacen.filas[0].cuil).toBe("20301234564");
   });
@@ -264,10 +289,12 @@ describe("CAT-3 — Chofer: alta/edición individual con normalización + restri
     const { controller } = crearControlador();
     await controller.create(
       plainToInstance(CreateChoferDto, { organizacionId: "org-1", transportistaId: "t1", nombre: "Juan", cuil: "20-30123456-4" } as any),
+      ACTOR,
     );
     await expect(
       controller.create(
         plainToInstance(CreateChoferDto, { organizacionId: "org-1", transportistaId: "t1", nombre: "Otro", cuil: "20.301.234.564" } as any),
+        ACTOR,
       ),
     ).rejects.toBeInstanceOf(Prisma.PrismaClientKnownRequestError);
   });
@@ -276,22 +303,25 @@ describe("CAT-3 — Chofer: alta/edición individual con normalización + restri
     const { controller, almacen } = crearControlador();
     await controller.create(
       plainToInstance(CreateChoferDto, { organizacionId: "org-1", transportistaId: "t1", nombre: "Juan", cuil: "20-30123456-4" } as any),
+      ACTOR,
     );
     const id = almacen.filas[0].id;
-    await expect(controller.update(id, plainToInstance(UpdateChoferDto, { cuil: "20.301.234.564" } as any))).resolves.toBeDefined();
+    await expect(controller.update(id, plainToInstance(UpdateChoferDto, { cuil: "20.301.234.564" } as any), ACTOR)).resolves.toBeDefined();
   });
 
   it("en edición, sí rechaza colisión con otro registro de la misma organización", async () => {
     const { controller, almacen } = crearControlador();
     await controller.create(
       plainToInstance(CreateChoferDto, { organizacionId: "org-1", transportistaId: "t1", nombre: "A", cuil: "20-30123456-4" } as any),
+      ACTOR,
     );
     await controller.create(
       plainToInstance(CreateChoferDto, { organizacionId: "org-1", transportistaId: "t1", nombre: "B", cuil: "20-40123456-4" } as any),
+      ACTOR,
     );
     const idB = almacen.filas[1].id;
     await expect(
-      controller.update(idB, plainToInstance(UpdateChoferDto, { cuil: "20-30123456-4" } as any)),
+      controller.update(idB, plainToInstance(UpdateChoferDto, { cuil: "20-30123456-4" } as any), ACTOR),
     ).rejects.toBeInstanceOf(Prisma.PrismaClientKnownRequestError);
   });
 
@@ -299,10 +329,12 @@ describe("CAT-3 — Chofer: alta/edición individual con normalización + restri
     const { controller, almacen } = crearControlador();
     await controller.create(
       plainToInstance(CreateChoferDto, { organizacionId: "org-1", transportistaId: "t1", nombre: "A", cuil: "20-30123456-4" } as any),
+      ACTOR,
     );
     await expect(
       controller.create(
         plainToInstance(CreateChoferDto, { organizacionId: "org-2", transportistaId: "t2", nombre: "A en otra org", cuil: "20-30123456-4" } as any),
+        ACTOR,
       ),
     ).resolves.toBeDefined();
     expect(almacen.filas).toHaveLength(2);
@@ -315,33 +347,48 @@ describe("CAT-3 — Chofer: alta/edición individual con normalización + restri
 // confirmar es el `data` que efectivamente llega a Prisma.update(), no solo el valor del DTO.
 describe("CAT-3 — Chofer: edición de DNI — borrar explícitamente vs. no tocar", () => {
   function crearControladorConMockSimple() {
-    const update = jest.fn(({ data }: { data: Record<string, unknown> }) => Promise.resolve({ id: "chofer-1", ...data }));
-    const prisma = { chofer: { update } } as unknown as OrganizacionPrismaClient;
+    const registro = {
+      id: "chofer-1",
+      transportistaId: "t1",
+      nombre: "Juan",
+      dni: "30111222",
+      cuil: "20301234564",
+      comisionPct: 5,
+      licenciaNumero: null,
+      licenciaVencimiento: null,
+      telefono: null,
+      activo: true,
+    };
+    const findUnique = jest.fn().mockResolvedValue(registro);
+    const update = jest.fn(({ data }: { data: Record<string, unknown> }) => Promise.resolve({ ...registro, ...data }));
+    const auditLog = { create: jest.fn().mockResolvedValue(undefined) };
+    const tx = { chofer: { findUnique, update }, auditLog };
+    const prisma = { $transaction: jest.fn((fn: any) => fn(tx)) } as unknown as OrganizacionPrismaClient;
     return { controller: new ChoferesController(prisma), update };
   }
 
   it("PATCH con dni: \"\" persiste null (borra el DNI), no deja el valor anterior sin cambios", async () => {
     const { controller, update } = crearControladorConMockSimple();
-    await controller.update("chofer-1", plainToInstance(UpdateChoferDto, { dni: "" } as any));
+    await controller.update("chofer-1", plainToInstance(UpdateChoferDto, { dni: "" } as any), ACTOR);
     expect(update).toHaveBeenCalledWith({ where: { id: "chofer-1" }, data: expect.objectContaining({ dni: null }) });
   });
 
   it("PATCH con dni compuesto solo por separadores también persiste null", async () => {
     const { controller, update } = crearControladorConMockSimple();
-    await controller.update("chofer-1", plainToInstance(UpdateChoferDto, { dni: " . - " } as any));
+    await controller.update("chofer-1", plainToInstance(UpdateChoferDto, { dni: " . - " } as any), ACTOR);
     expect(update).toHaveBeenCalledWith({ where: { id: "chofer-1" }, data: expect.objectContaining({ dni: null }) });
   });
 
   it("PATCH que no envía dni no lo incluye en absoluto en el data (Prisma no lo toca, valor previo preservado)", async () => {
     const { controller, update } = crearControladorConMockSimple();
-    await controller.update("chofer-1", plainToInstance(UpdateChoferDto, { comisionPct: 8 } as any));
+    await controller.update("chofer-1", plainToInstance(UpdateChoferDto, { comisionPct: 8 } as any), ACTOR);
     const dataEnviada = update.mock.calls[0][0].data;
     expect("dni" in dataEnviada).toBe(false);
   });
 
   it("PATCH con un dni real lo persiste normalizado", async () => {
     const { controller, update } = crearControladorConMockSimple();
-    await controller.update("chofer-1", plainToInstance(UpdateChoferDto, { dni: "30.111.222" } as any));
+    await controller.update("chofer-1", plainToInstance(UpdateChoferDto, { dni: "30.111.222" } as any), ACTOR);
     expect(update).toHaveBeenCalledWith({ where: { id: "chofer-1" }, data: expect.objectContaining({ dni: "30111222" }) });
   });
 });
@@ -349,46 +396,46 @@ describe("CAT-3 — Chofer: edición de DNI — borrar explícitamente vs. no to
 describe("CAT-3 — Vehiculo: alta/edición individual con normalización + restricción única real (patente)", () => {
   function crearControlador() {
     const almacen = crearAlmacenConRestriccionUnica("patente");
-    const prisma = { vehiculo: { create: almacen.create, update: almacen.update } } as unknown as OrganizacionPrismaClient;
+    const prisma = crearPrismaConTx(almacen, "vehiculo");
     return { controller: new VehiculosController(prisma), almacen };
   }
 
   it("guarda la patente normalizada", async () => {
     const { controller, almacen } = crearControlador();
-    await controller.create(plainToInstance(CreateVehiculoDto, { organizacionId: "org-1", transportistaId: "t1", patente: "ab-123-cd", tipo: "CAMION" } as any));
+    await controller.create(plainToInstance(CreateVehiculoDto, { organizacionId: "org-1", transportistaId: "t1", patente: "ab-123-cd", tipo: "CAMION" } as any), ACTOR);
     expect(almacen.filas[0].patente).toBe("AB123CD");
   });
 
   it("rechaza un duplicado escrito con formato diferente al ya guardado", async () => {
     const { controller } = crearControlador();
-    await controller.create(plainToInstance(CreateVehiculoDto, { organizacionId: "org-1", transportistaId: "t1", patente: "AB123CD", tipo: "CAMION" } as any));
+    await controller.create(plainToInstance(CreateVehiculoDto, { organizacionId: "org-1", transportistaId: "t1", patente: "AB123CD", tipo: "CAMION" } as any), ACTOR);
     await expect(
-      controller.create(plainToInstance(CreateVehiculoDto, { organizacionId: "org-1", transportistaId: "t1", patente: "ab 123 cd", tipo: "ACOPLADO" } as any)),
+      controller.create(plainToInstance(CreateVehiculoDto, { organizacionId: "org-1", transportistaId: "t1", patente: "ab 123 cd", tipo: "ACOPLADO" } as any), ACTOR),
     ).rejects.toBeInstanceOf(Prisma.PrismaClientKnownRequestError);
   });
 
   it("en edición, el propio registro no colisiona consigo mismo aunque se reenvíe en otro formato", async () => {
     const { controller, almacen } = crearControlador();
-    await controller.create(plainToInstance(CreateVehiculoDto, { organizacionId: "org-1", transportistaId: "t1", patente: "AB123CD", tipo: "CAMION" } as any));
+    await controller.create(plainToInstance(CreateVehiculoDto, { organizacionId: "org-1", transportistaId: "t1", patente: "AB123CD", tipo: "CAMION" } as any), ACTOR);
     const id = almacen.filas[0].id;
-    await expect(controller.update(id, plainToInstance(UpdateVehiculoDto, { patente: "ab-123-cd" } as any))).resolves.toBeDefined();
+    await expect(controller.update(id, plainToInstance(UpdateVehiculoDto, { patente: "ab-123-cd" } as any), ACTOR)).resolves.toBeDefined();
   });
 
   it("en edición, sí rechaza colisión con otro registro de la misma organización", async () => {
     const { controller, almacen } = crearControlador();
-    await controller.create(plainToInstance(CreateVehiculoDto, { organizacionId: "org-1", transportistaId: "t1", patente: "AB123CD", tipo: "CAMION" } as any));
-    await controller.create(plainToInstance(CreateVehiculoDto, { organizacionId: "org-1", transportistaId: "t1", patente: "XY987ZZ", tipo: "CAMION" } as any));
+    await controller.create(plainToInstance(CreateVehiculoDto, { organizacionId: "org-1", transportistaId: "t1", patente: "AB123CD", tipo: "CAMION" } as any), ACTOR);
+    await controller.create(plainToInstance(CreateVehiculoDto, { organizacionId: "org-1", transportistaId: "t1", patente: "XY987ZZ", tipo: "CAMION" } as any), ACTOR);
     const idB = almacen.filas[1].id;
     await expect(
-      controller.update(idB, plainToInstance(UpdateVehiculoDto, { patente: "AB123CD" } as any)),
+      controller.update(idB, plainToInstance(UpdateVehiculoDto, { patente: "AB123CD" } as any), ACTOR),
     ).rejects.toBeInstanceOf(Prisma.PrismaClientKnownRequestError);
   });
 
   it("la misma patente normalizada es válida en dos organizaciones distintas (aislamiento preservado)", async () => {
     const { controller, almacen } = crearControlador();
-    await controller.create(plainToInstance(CreateVehiculoDto, { organizacionId: "org-1", transportistaId: "t1", patente: "AB123CD", tipo: "CAMION" } as any));
+    await controller.create(plainToInstance(CreateVehiculoDto, { organizacionId: "org-1", transportistaId: "t1", patente: "AB123CD", tipo: "CAMION" } as any), ACTOR);
     await expect(
-      controller.create(plainToInstance(CreateVehiculoDto, { organizacionId: "org-2", transportistaId: "t2", patente: "AB123CD", tipo: "CAMION" } as any)),
+      controller.create(plainToInstance(CreateVehiculoDto, { organizacionId: "org-2", transportistaId: "t2", patente: "AB123CD", tipo: "CAMION" } as any), ACTOR),
     ).resolves.toBeDefined();
     expect(almacen.filas).toHaveLength(2);
   });

@@ -10,12 +10,19 @@ import { validate } from "class-validator";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
 import { RolesGuard } from "../auth/roles.guard";
 import { Roles } from "../auth/roles.decorator";
+import { CurrentUser } from "../auth/current-user.decorator";
 import { ORGANIZACION_PRISMA } from "../prisma/organizacion-prisma.token";
 import { OrganizacionPrismaClient } from "../prisma/organizacion-prisma.client";
 import { encontrarOFallar } from "../common/encontrar-o-fallar";
 import { parsearCsv, filasComoObjetos, validarEncabezados, LIMITE_FILAS_IMPORTACION_CSV } from "../common/csv";
 import { mensajeErrorImportacion } from "../common/importacion-errores";
 import { normalizarCuit, normalizarCuil, normalizarDni } from "../common/normalizacion";
+import {
+  registrarAuditoria,
+  calcularCamposCambiados,
+  subconjunto,
+  marcarOrigenImportacionCsv,
+} from "../common/auditoria";
 import { CreateChoferDto } from "./dto/create-chofer.dto";
 import { UpdateChoferDto } from "./dto/update-chofer.dto";
 
@@ -31,6 +38,34 @@ const PLANTILLA_CHOFERES_CSV =
 // leer una sola fila — un CSV al que directamente le falta la columna "cuil" se rechaza completo
 // con un mensaje claro, en vez de rechazar cada fila una por una con "cuil should not be empty".
 const ENCABEZADOS_OBLIGATORIOS_CHOFERES = ["transportistaCuit", "nombre", "cuil"];
+
+// CAT-4: entidad y allowlist de AuditLog. dni/cuil/telefono/licenciaNumero se enmascaran en
+// registrarAuditoria() (identificadores personales) — transportistaId queda legible porque es la
+// relación editable en sí (a qué transportista pertenece), no un dato personal.
+const ENTIDAD_CHOFER = "Chofer";
+function snapshotChofer(c: {
+  transportistaId: string;
+  nombre: string;
+  dni: string | null;
+  cuil: string;
+  comisionPct: number;
+  licenciaNumero: string | null;
+  licenciaVencimiento: Date | null;
+  telefono: string | null;
+  activo: boolean;
+}) {
+  return {
+    transportistaId: c.transportistaId,
+    nombre: c.nombre,
+    dni: c.dni,
+    cuil: c.cuil,
+    comisionPct: c.comisionPct,
+    licenciaNumero: c.licenciaNumero,
+    licenciaVencimiento: c.licenciaVencimiento,
+    telefono: c.telefono,
+    activo: c.activo,
+  };
+}
 
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller("choferes")
@@ -62,13 +97,12 @@ export class ChoferesController {
   //      también dentro del propio archivo — no se crea un chofer duplicado ni se convierte
   //      silenciosamente la importación en una edición: la fila se rechaza con un mensaje que
   //      distingue "ya existe en la base" de "duplicado dentro del archivo".
-  // El alta individual de Chofer (create() más abajo) no genera AuditLog — la importación
-  // tampoco genera uno: sigue exactamente la misma política vigente (Bloque de auditoría
-  // verificado en el diagnóstico de CAT-2, no se amplía acá).
+  // CAT-4: cada fila creada genera su propio AuditLog ("chofer_creado", origen "importacion_csv"),
+  // atómico con el create() de esa fila — ver el try/catch más abajo.
   @Roles("OPERACIONES", "LIQUIDACIONES", "ADMINISTRADOR")
   @Post("importar")
   @UseInterceptors(FileInterceptor("archivo", { limits: { fileSize: 2 * 1024 * 1024 } }))
-  async importar(@UploadedFile() archivo?: Express.Multer.File) {
+  async importar(@UploadedFile() archivo: Express.Multer.File | undefined, @CurrentUser() actor: any) {
     if (!archivo) throw new BadRequestException("Debe adjuntar un archivo CSV en el campo 'archivo'.");
     const filasCrudas = parsearCsv(archivo.buffer.toString("utf-8"));
     if (filasCrudas.length === 0) throw new BadRequestException("El archivo está vacío.");
@@ -177,17 +211,27 @@ export class ChoferesController {
       if (dto.dni) dnisVistosEnArchivo.add(dto.dni);
 
       try {
-        await this.prisma.chofer.create({
-          data: {
-            transportistaId: dto.transportistaId,
-            nombre: dto.nombre,
-            dni: dto.dni || null,
-            cuil: dto.cuil,
-            comisionPct: dto.comisionPct ?? undefined,
-            licenciaNumero: dto.licenciaNumero || null,
-            licenciaVencimiento: dto.licenciaVencimiento ? new Date(dto.licenciaVencimiento) : null,
-            telefono: dto.telefono || null,
-          },
+        // CAT-4: entidad + AuditLog atómicos por fila — ver clientes.controller.ts.
+        await this.prisma.$transaction(async (tx) => {
+          const creado = await tx.chofer.create({
+            data: {
+              transportistaId: dto.transportistaId,
+              nombre: dto.nombre,
+              dni: dto.dni || null,
+              cuil: dto.cuil,
+              comisionPct: dto.comisionPct ?? undefined,
+              licenciaNumero: dto.licenciaNumero || null,
+              licenciaVencimiento: dto.licenciaVencimiento ? new Date(dto.licenciaVencimiento) : null,
+              telefono: dto.telefono || null,
+            },
+          });
+          await registrarAuditoria(tx, {
+            usuarioId: actor.id,
+            entidad: ENTIDAD_CHOFER,
+            entidadId: creado.id,
+            accion: "chofer_creado",
+            datosNuevos: marcarOrigenImportacionCsv(snapshotChofer(creado)),
+          });
         });
         creados++;
         detalle.push({ fila: numeroFila, ok: true, mensaje: "Creado correctamente." });
@@ -220,20 +264,76 @@ export class ChoferesController {
 
   @Roles("OPERACIONES", "LIQUIDACIONES", "ADMINISTRADOR")
   @Post()
-  create(@Body() body: CreateChoferDto) {
-    return this.prisma.chofer.create({ data: body });
+  create(@Body() body: CreateChoferDto, @CurrentUser() actor: any) {
+    return this.prisma.$transaction(async (tx) => {
+      const creado = await tx.chofer.create({ data: body });
+      await registrarAuditoria(tx, {
+        usuarioId: actor.id,
+        entidad: ENTIDAD_CHOFER,
+        entidadId: creado.id,
+        accion: "chofer_creado",
+        datosNuevos: snapshotChofer(creado),
+      });
+      return creado;
+    });
   }
 
   @Roles("OPERACIONES", "LIQUIDACIONES", "ADMINISTRADOR")
   @Patch(":id")
-  update(@Param("id") id: string, @Body() body: UpdateChoferDto) {
-    return this.prisma.chofer.update({ where: { id }, data: body });
+  update(@Param("id") id: string, @Body() body: UpdateChoferDto, @CurrentUser() actor: any) {
+    return this.prisma.$transaction(async (tx) => {
+      const actual = encontrarOFallar(await tx.chofer.findUnique({ where: { id } }), "Chofer no encontrado.");
+      const actualizado = await tx.chofer.update({ where: { id }, data: body });
+
+      const antes = snapshotChofer(actual);
+      const despues = snapshotChofer(actualizado);
+      const cambios = calcularCamposCambiados(antes, despues);
+      const cambioActivo = cambios.includes("activo");
+      const otrosCambios = cambios.filter((c) => c !== "activo");
+
+      if (cambioActivo) {
+        await registrarAuditoria(tx, {
+          usuarioId: actor.id,
+          entidad: ENTIDAD_CHOFER,
+          entidadId: id,
+          accion: despues.activo ? "chofer_reactivado" : "chofer_desactivado",
+          datosAnteriores: { nombre: antes.nombre, activo: antes.activo },
+          datosNuevos: { nombre: despues.nombre, activo: despues.activo },
+        });
+      }
+      if (otrosCambios.length > 0) {
+        const claves = Array.from(new Set(["nombre", ...otrosCambios]));
+        await registrarAuditoria(tx, {
+          usuarioId: actor.id,
+          entidad: ENTIDAD_CHOFER,
+          entidadId: id,
+          accion: "chofer_editado",
+          datosAnteriores: subconjunto(antes, claves),
+          datosNuevos: subconjunto(despues, claves),
+        });
+      }
+      return actualizado;
+    });
   }
 
   @Roles("OPERACIONES", "LIQUIDACIONES", "ADMINISTRADOR")
   @Delete(":id")
-  remove(@Param("id") id: string) {
-    return this.prisma.chofer.update({ where: { id }, data: { activo: false } });
+  remove(@Param("id") id: string, @CurrentUser() actor: any) {
+    return this.prisma.$transaction(async (tx) => {
+      const actual = encontrarOFallar(await tx.chofer.findUnique({ where: { id } }), "Chofer no encontrado.");
+      const actualizado = await tx.chofer.update({ where: { id }, data: { activo: false } });
+      if (actual.activo !== actualizado.activo) {
+        await registrarAuditoria(tx, {
+          usuarioId: actor.id,
+          entidad: ENTIDAD_CHOFER,
+          entidadId: id,
+          accion: "chofer_desactivado",
+          datosAnteriores: { nombre: actual.nombre, activo: actual.activo },
+          datosNuevos: { nombre: actualizado.nombre, activo: actualizado.activo },
+        });
+      }
+      return actualizado;
+    });
   }
 
   @Get("export/excel")

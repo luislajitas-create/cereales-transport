@@ -263,4 +263,127 @@ Durante la preparación de esta auditoría se intentó listar variables del serv
 
 - `Organizacion.cuit` y `Productor.cuit` quedan **sin normalizar** — explícitamente fuera del pedido de CAT-3.
 - El desajuste de datos del seed ("Cliente Demo A", ver arriba) queda documentado pero sin corregir — no es un problema de normalización.
-- `AuditLog` en altas/ediciones y detección proactiva en lote de CUIT para Clientes/Transportistas siguen como deuda de CAT-2, sin cambios.
+- Detección proactiva en lote de CUIT para Clientes/Transportistas sigue como deuda de CAT-2, sin cambios.
+- ~~`AuditLog` en altas/ediciones~~ — **cerrado por CAT-4** (ver sección abajo): las cuatro entidades ahora generan AuditLog en alta/edición/baja/reactivación/importación.
+
+## CAT-4 — Auditoría integral de cambios en catálogos
+
+**Objetivo:** Cliente/Transportista/Chofer/Vehículo no generaban ningún `AuditLog` en alta, edición, baja, reactivación ni importación CSV — a diferencia de Cobranza (FAC-3/FAC-4) y Usuario/Organización/GrupoEconómico, que sí lo hacían desde antes. CAT-4 cierra esa brecha reusando exactamente la pantalla de Auditoría Administrativa que ya existía (FAC-4), sin tocar frontend.
+
+### Matriz auditada (previa a cualquier cambio de código)
+
+| Entidad | Acción real | Endpoint | Rol permitido | AuditLog antes de CAT-4 |
+|---|---|---|---|---|
+| Cliente | Crear / Editar / Desactivar / Reactivar / Importar CSV | `POST` `PATCH` `DELETE /clientes[/:id]`, `POST /clientes/importar` | OPERACIONES, FACTURACION, ADMINISTRADOR | Ninguno |
+| Transportista | ídem | `POST` `PATCH` `DELETE /transportistas[/:id]`, `POST /transportistas/importar` | OPERACIONES, ADMINISTRADOR | Ninguno |
+| Chofer | ídem | `POST` `PATCH` `DELETE /choferes[/:id]`, `POST /choferes/importar` | OPERACIONES, LIQUIDACIONES, ADMINISTRADOR | Ninguno |
+| Vehículo | ídem | `POST` `PATCH` `DELETE /vehiculos[/:id]`, `POST /vehiculos/importar` | OPERACIONES, ADMINISTRADOR (sin LIQUIDACIONES) | Ninguno |
+
+Ningún helper/servicio de auditoría compartido existía en todo el backend antes de CAT-4 (confirmado por grep sobre los 16 archivos que ya usaban `auditLog.create()`/`tx.auditLog.create()`: todos inline, sin abstracción común). El modelo `AuditLog` (`id, organizacionId, usuarioId, entidad, entidadId, accion, datosAnteriores, datosNuevos, fecha`) representa las cinco acciones sin necesitar migración.
+
+**Decisión de alcance confirmada explícitamente:** se audita al nivel del **contrato de backend**, no de lo que el frontend ejercita hoy. El frontend real de Cliente/Transportista solo llega a `activo` vía `PATCH .../:id` con `{ activo: !actual }` (nunca usa el `DELETE` dedicado); Chofer solo tiene UI para crear y editar `comisionPct`; Vehículo no tiene ninguna UI de editar/desactivar/reactivar. Los cuatro endpoints (`update`/`remove`) existen y responden igual en el backend para las cuatro entidades — auditar solo lo que el frontend usa hoy habría dejado sin rastro cualquier edición/baja hecha directamente contra la API.
+
+### Política de eventos
+
+- **Nomenclatura:** `entidad_accion` en snake_case (`cliente_creado`, `cliente_editado`, `cliente_desactivado`, `cliente_reactivado`; mismo patrón para `transportista_*`, `chofer_*`, `vehiculo_*`) — la convención dominante real (15 de 16 usos previos, `usuario_creado`/`usuario_editado`/`organizacion_editada`/etc.), no el patrón terse que solo usa Cobranza.
+- **`DELETE /:id` y `PATCH /:id` con `{activo:false}` comparten la misma acción** (`X_desactivado`), decidida por el cambio real de `activo`, no por qué endpoint la disparó — son la misma mutación de negocio alcanzada por dos rutas.
+- **Origen de importación CSV:** el modelo no tiene un campo dedicado para distinguir alta individual de alta por CSV. En vez de duplicar acciones (`cliente_creado_csv`), cada fila creada por importación reusa la misma acción que el alta individual (`cliente_creado`) y agrega una clave reservada `_origen: "importacion_csv"` dentro de `datosNuevos` (`backend/src/common/auditoria.ts`, `marcarOrigenImportacionCsv()`) — ningún campo real de las cuatro entidades se llama `_origen`, así que nunca se confunde con un dato de negocio. Mantiene el selector de acciones de Auditoría Administrativa sin duplicar entradas.
+- **Sin evento agregado de lote de importación:** decisión explícita, no omisión. El modelo no tiene `batchId`/`importId` — agregarlo requeriría migración, y un evento por fila con `_origen` ya da trazabilidad completa sin ambigüedad ni riesgo de confundir el trail.
+- **No hay backfill histórico:** CAT-4 solo audita operaciones desde su propio despliegue en adelante, tal como se pidió.
+
+### Atomicidad
+
+Mismo patrón que FAC-3/FAC-4 (`$transaction(async (tx) => {...})`): la mutación de negocio y el/los `AuditLog` corren en la misma transacción — si `auditLog.create()` falla, Prisma revierte también la mutación; si la mutación falla, nunca se llega a crear el AuditLog. `AuditLog` está en `ORGANIZACIONAL_MODELS`, así que `organizacionId` se inyecta automáticamente incluso dentro de `tx` — nunca se pasa manualmente.
+
+- **`create()`:** entidad + AuditLog (`X_creado`, `datosAnteriores` ausente) en una transacción.
+- **`update()`:** hace `findUnique` dentro del mismo `tx` para obtener el "antes" real (aislado por organización, igual que cualquier otra lectura), luego `update()`, luego compara antes/después con `calcularCamposCambiados()`.
+- **`remove()` (`DELETE /:id`):** hace `findUnique` + `update({activo:false})` en la misma transacción; si `activo` ya era `false` (operación idempotente), no genera ningún evento.
+- **`importar()`:** cada fila corre en su propio `$transaction` — entidad + AuditLog atómicos **por fila**, nunca todo el archivo en una sola transacción. Una fila cuyo `AuditLog` fallara no deja la entidad creada (revierte esa fila sola); las filas anteriores ya confirmadas se preservan intactas — mismo semántica de resultado parcial que CAT-1/CAT-2 ya tenían, ahora también atómica a nivel auditoría.
+
+**Regla obligatoria de PATCH mixto (sección 3 del pedido):** un `PATCH` que cambia **solo** `activo` genera un único evento de estado (`X_desactivado`/`X_reactivado`); que cambia **solo** otros campos genera un único `X_editado`; que cambia **`activo` y otros campos en la misma petición** genera **dos eventos separados** (estado primero, edición después), ambos dentro de la misma transacción que el `UPDATE` — nunca se clasifica todo como un solo evento. Un `PATCH` que no cambia nada realmente (comparado campo a campo contra el valor previo, no solo "el campo vino en el body") no genera ningún evento.
+
+### Datos personales — minimización antes de almacenar (ajuste obligatorio del usuario)
+
+La propuesta inicial de este bloque era no enmascarar DNI/CUIL/teléfono/licencia porque ya son visibles en texto plano en otras pantallas — **el usuario no lo aprobó**: AuditLog tiene otra finalidad y retención potencialmente distinta, y que un dato sea consultable hoy en otra pantalla no justifica duplicarlo permanentemente en el historial de auditoría. Política final, implementada en `backend/src/common/auditoria.ts` (`sanitizarParaAuditoria()`, única función central, aplicada automáticamente por `registrarAuditoria()` — ningún controller la invoca a mano):
+
+- `dni`, `cuil`, `telefono`, `licenciaNumero` → enmascarados, conservando como máximo los **últimos 4 caracteres** (`"30123456"` → `"****3456"`), comparación de nombre de campo sin distinguir mayúsculas/minúsculas.
+- `cuit` (Cliente/Transportista) y `patente` (Vehículo) quedan **legibles** — son identificadores comerciales, no personales (decisión explícita del usuario para este bloque).
+- Cualquier campo cuyo nombre matchee un patrón de secreto (`password`, `token`, `hash`, `secret`, `clave`, etc. — mismo patrón que ya usa el frontend de Auditoría Administrativa) se oculta por completo (`"[oculto]"`), como segunda salvaguarda estructural — ninguna de las cuatro entidades tiene hoy contraseñas/tokens.
+- Aplica **recursivamente** a `datosAnteriores`/`datosNuevos` (objetos y arrays anidados).
+- La clave reservada `_origen` nunca se enmascara ni se interpreta como dato personal.
+- El diff que decide si un campo "cambió" (`calcularCamposCambiados()`) compara los valores **crudos**, antes de enmascarar — dos DNI distintos que enmascararían igual (mismos últimos 4 dígitos) no deben confundirse con "sin cambios".
+- La sanitización visual de FAC-4 en el frontend (`PATRON_CLAVE_SENSIBLE`) **no se modificó** y sigue funcionando como segunda defensa — la de `auditoria.ts` es la primera, aplicada antes de escribir en la base.
+
+### Snapshots por allowlist (nunca el objeto Prisma completo)
+
+Cada controller define su propia función `snapshotX()` con una lista explícita de campos auditables — nunca se serializa el resultado de Prisma tal cual. Excluidos siempre: `organizacionId`, `id` (ya es `entidadId`), relaciones anidadas (`contactos`, `choferes`, `vehiculos`, `transportista`), timestamps técnicos (`createdAt`). Por entidad:
+
+| Entidad | Campos en el snapshot |
+|---|---|
+| Cliente | `razonSocial`, `cuit`, `condicionesComerciales`, `activo` |
+| Transportista | `razonSocial`, `cuit`, `domicilio`, `activo` |
+| Chofer | `transportistaId`, `nombre`, `dni`, `cuil`, `comisionPct`, `licenciaNumero`, `licenciaVencimiento`, `telefono`, `activo` |
+| Vehículo | `transportistaId`, `patente`, `marca`, `modelo`, `tipo`, `capacidadKg`, `vencimientoRto`, `vencimientoSeguro`, `activo` |
+
+`transportistaId` se conserva como identificador plano (no como relación completa) porque es el único campo editable que muestra a qué transportista pertenece un Chofer/Vehículo — perderlo habría ocultado justamente el dato más relevante de una reasignación. Los eventos de edición (`X_editado`) solo incluyen los campos que **realmente cambiaron** (más un campo identificador estable — `razonSocial`/`nombre`/`patente` — para que el ADMINISTRADOR ubique el registro sin decodificar `entidadId`); los eventos de estado (`X_desactivado`/`X_reactivado`) incluyen ese mismo identificador más `activo`.
+
+### Reutilización
+
+`backend/src/common/auditoria.ts` — helper tipado único (no un servicio, no necesita inyección de dependencias): `registrarAuditoria(tx, {usuarioId, entidad, entidadId, accion, datosAnteriores?, datosNuevos?})` envuelve `tx.auditLog.create()` aplicando la sanitización siempre, más `calcularCamposCambiados()`, `subconjunto()` y `marcarOrigenImportacionCsv()` como utilidades puras compartidas por los cuatro controllers. Sin infraestructura nueva (sin colas, sin interceptores globales, sin event sourcing) — exactamente lo que pedía el punto 7 del alcance.
+
+### Aislamiento multi-tenant y roles
+
+- `AuditLog` está en `ORGANIZACIONAL_MODELS`: `organizacionId` se inyecta automáticamente en cada `auditLog.create()`, incluso dentro de `tx` — nunca se acepta del body ni se pasa manualmente en ningún punto de CAT-4 (verificado con una prueba dedicada sobre `registrarAuditoria()` que confirma que el objeto escrito nunca incluye la clave `organizacionId`).
+- El "antes" de cada `update()`/`remove()` se lee con `tx.findUnique({where:{id}})` — el mismo mecanismo de aislamiento que cualquier otra lectura de la extensión; nunca se lee una entidad de otra organización para construir el snapshot previo.
+- **Los roles de CAT-2 se preservaron exactamente**, sin ampliarlos: Choferes sigue siendo el único de los cuatro con `LIQUIDACIONES`; Vehículos sigue sin esa asimetría. No se agregó ningún `@Roles()` nuevo ni se relajó ninguno existente — CAT-4 solo agrega `@CurrentUser()` a los métodos que no lo tenían.
+
+### Frontend
+
+**Sin cambios.** Auditoría Administrativa (`AuditoriaAdministrativa.tsx`) ya obtiene entidades/acciones dinámicamente desde `GET /auditoria/opciones` (`groupBy` real sobre `entidad`/`accion`, sin lista hardcodeada) — confirmado con la suite existente `organizacion.controller.auditoria-opciones.spec.ts`, que ya prueba el comportamiento genérico con valores arbitrarios. Las nuevas entidades (`Cliente`, `Transportista`, `Chofer`, `Vehiculo`) y acciones (`*_creado`, `*_editado`, `*_desactivado`, `*_reactivado`) aparecerán solas en los selectores en cuanto existan eventos reales, sin ningún cambio de código en el frontend. La sanitización visual del frontend sigue aplicando igual sobre los valores ya enmascarados que llegan desde el backend.
+
+**Limitación preexistente encontrada durante la validación manual (no introducida ni corregida por CAT-4):** el formulario rápido de alta de Chofer embebido en `Transportistas.tsx` no tiene campo de teléfono — solo Nombre, DNI, CUIL, N° Licencia y Comisión% (`nuevoChofer` en ese archivo). Un Chofer creado desde ese formulario persiste `telefono: null`, así que el enmascarado de teléfono no se puede observar visualmente desde esa pantalla. No es un defecto de CAT-4: el backend acepta y enmascara `telefono` igual que los otros tres campos personales cuando se envía (probado explícitamente en `backend/src/common/auditoria.spec.ts` y `backend/src/catalogos/choferes.controller.auditoria.spec.ts`, que sí crean choferes con teléfono y confirman `****xxxx`). Ampliar ese formulario queda fuera del alcance de CAT-4.
+
+### Pruebas incorporadas (73 tests nuevos, 5 suites nuevas)
+
+- **`backend/src/common/auditoria.spec.ts`** (24 tests): enmascarado de dni/cuil/telefono/licenciaNumero conservando últimos 4; cuit/patente sin tocar; ocultamiento total de campos-secreto; recursividad en objetos/arrays anidados; la clave `_origen` nunca se enmascara; `calcularCamposCambiados` (idéntico → sin cambios, fechas por valor no por identidad, `null`≡`undefined`); `subconjunto`; `registrarAuditoria` (forma exacta del registro, sanitiza antes de persistir, nunca incluye `organizacionId`, propaga el error si `auditLog.create` falla).
+- **`clientes.controller.auditoria.spec.ts`** (16 tests), **`transportistas.controller.auditoria.spec.ts`** (11), **`choferes.controller.auditoria.spec.ts`** (11, incluye aserciones explícitas de enmascarado de DNI/CUIL/teléfono/licencia en create/update/importar), **`vehiculos.controller.auditoria.spec.ts`** (11): create (entidad+AuditLog, `datosAnteriores` vacío, rollback si `auditLog.create` falla), update (antes/después reales, PATCH idempotente sin evento, split de dos eventos en PATCH mixto, 404 sin tocar Prisma.update ni AuditLog si el registro no existe, rollback si `auditLog.create` falla, "antes" leído por el `tx` aislado), remove (baja lógica nunca física, sin evento fantasma si ya estaba inactivo), importar (evento por fila con `_origen`, fila rechazada sin entidad ni AuditLog, fila con fallo de auditoría no persiste la entidad y no afecta filas previas exitosas).
+- Se actualizaron (sin cambiar su intención original) los specs preexistentes que ya mockeaban `create()`/`update()`/`importar()` de las cuatro entidades — `normalizacion-alta-edicion.spec.ts` y los cuatro `*.controller.importar.spec.ts` — para reflejar que ahora corren dentro de `$transaction` y reciben `@CurrentUser()`; ninguna aserción de negocio original se relajó ni se eliminó.
+
+### Reconciliación del baseline
+
+Cifra de referencia del usuario al abrir CAT-4: 36 suites / 484 tests. Medido en vivo antes de escribir código: **37 suites / 496 tests** — la diferencia es exactamente `migracion-cat3-atomicidad.spec.ts` (1 suite, 12 tests), agregado por CAT-3 y ya commiteado localmente (`48cbd1a`) antes de que arrancara este bloque; confirmado por `git log --follow` sobre ese archivo (aparece únicamente en el commit de CAT-3) y por conteo manual de sus `it(...)` (6 sueltos + 1 + `it.each` de 5 = 12). Ningún archivo ajeno explica la diferencia.
+
+**Baseline real de cierre de CAT-4: 42 suites / 569 tests** (37/496 + 5 suites / 73 tests nuevos de este bloque).
+
+### Validación
+
+- `npm run test:dev1`: 14/14 ✅ (no relacionado con CAT-4, confirma que nada del entorno se rompió)
+- Backend build (`nest build`): limpio
+- `npx jest --no-cache` (backend, completo): **42 suites / 569 tests, todos verdes**
+- Frontend `tsc -b` + `vite build`: limpios (CAT-4 no tocó ningún archivo de frontend)
+- `git diff --check`: sin errores de espacio en blanco (solo avisos de conversión LF→CRLF, normales en este repo)
+
+### Validación manual local
+
+**Incidente en la primera ronda — sin correlato verificable en la base.** Se entregó a Luis un checklist visual de 10 pasos (Cliente, Transportista, Chofer, Vehículo, importación CSV, filtros, identidad del actor) y reportó los seis puntos como correctos. Al ir a limpiar los datos de prueba, **ninguno de los identificadores acordados existía en la base local conectada al backend** — el único evento real en `AuditLog` para las cuatro entidades era un `cliente_creado` aislado de un Cliente llamado "losnanos", sin relación con el checklist. Diagnóstico de solo lectura (sin tocar producción ni Railway): la configuración local no presentaba ninguna ambigüedad técnica — `backend/.env` apunta sin ambigüedad a `localhost:5432/cereal_db`, y `frontend/` no tiene ningún `.env` propio (solo `.env.example`), así que `api/client.ts` cae siempre a su fallback hardcodeado `http://localhost:3000/api/v1`. Sí se encontraron **tres árboles `npm run dev` completos corriendo en paralelo** (iniciados en tres momentos distintos, sin que ninguno cerrara al anterior — el `preflight` de DEV-1 no impidió los arranques sucesivos), pero los tres cargaban el mismo `.env`, así que no explican por sí solos una base de datos distinta. La causa más probable de la discrepancia — pestaña de navegador vieja, otro puerto, u otra URL — no pudo confirmarse de forma remota. **La primera ronda no se declaró válida ni se documenta acá como comprobada contra la base.**
+
+**Saneamiento del entorno.** Se cerraron los tres árboles `npm run dev` completos (`taskkill /T /F` sobre la raíz de cada uno, confirmando primero que las tres cadenas de procesos pertenecían a este repo) y se levantó una única instancia mediante el flujo estándar de DEV-1. Verificado: un solo proceso backend y uno frontend (un PID cada uno), `localhost:5432/cereal_db`, `GET /health` → `200` con `database: connected`, login `admin@demo.com` exitoso.
+
+**Comprobación de conexión antes de repetir.** Antes de crear cualquier dato, se le pidió a Luis abrir una **pestaña nueva** en `http://localhost:5173` (no reutilizar la anterior) y confirmar en DevTools → Network que la `Request URL` de la llamada a `/clientes` empezara exactamente con `http://localhost:3000/api/v1` — confirmado por Luis antes de continuar.
+
+**Segunda ronda (abreviada), con evidencia consultada en la base local después de cada paso, antes de habilitar el siguiente:**
+- **Cliente individual:** creado desde la UI (`CAT4-B Cliente Temp`) → verificado en la base: un único registro, un único `AuditLog` `cliente_creado`, `datosAnteriores` vacío, `datosNuevos` correcto, actor `admin@demo.com` / `Admin General`, sin eventos duplicados.
+- **Chofer:** creado desde la UI dentro de un Transportista **ya existente** ("Transportista Demo A" — no se creó ni modificó ningún Transportista) → verificado un único registro y un único `AuditLog` `chofer_creado`; DNI/CUIL/licencia enmascarados exactamente `****` + últimos 4 caracteres; ninguno de los cuatro valores completos aparece en el JSON del evento (verificado por búsqueda de substring); actor correcto; `nombre`/`transportistaId` correctos.
+- **Teléfono:** no observable desde esta pantalla — el formulario rápido de alta de Chofer en `Transportistas.tsx` no tiene campo de teléfono (ver "Frontend" arriba), así que se persistió `null`. Su enmascarado queda cubierto **exclusivamente por pruebas automatizadas** (`auditoria.spec.ts`, `choferes.controller.auditoria.spec.ts`), no por esta ronda visual.
+- **Importación CSV de Cliente:** una fila válida + una fila con el mismo CUIT en otro formato → la UI reportó 1 creado / 1 rechazado; verificado en base: el creado existe con `datosNuevos._origen: "importacion_csv"`, actor correcto; la fila rechazada nunca llegó a existir como Cliente ni generó ningún `AuditLog` (confirmado además con una búsqueda amplia por si hubiera quedado un evento huérfano); sin duplicados.
+
+**Qué NO fue revalidado visualmente en esta segunda ronda** — permanece cubierto únicamente por las 73 pruebas automatizadas de CAT-4 (ver "Pruebas incorporadas" arriba) y por la auditoría técnica del bloque, **no por evidencia de base de datos de esta ronda**: edición/desactivación/reactivación de Cliente; el ciclo completo de Transportista (crear/editar/desactivar/reactivar); alta/edición/baja/reactivación de Vehículo; la regla de PATCH mixto (dos eventos cuando cambian `activo` y otro campo en la misma petición); los eventos no-op; los filtros de Auditoría Administrativa por entidad/acción/rango de fecha y su paginación. No se afirma que estos casos hayan sido comprobados contra la base en esta segunda ronda.
+
+**Limpieza de los datos de esta segunda ronda.** Los tres registros de prueba (`CAT4-B Cliente Temp`, `CAT4-B Cliente CSV Temp`, `CAT4-B Chofer Temp`) se eliminaron con un script de mantenimiento puntual fuera de la aplicación (`Prisma.delete()` directo, no vía los endpoints) — la regla de CAT-4 de nunca hacer baja física rige el comportamiento de la aplicación sobre datos de negocio reales, no la limpieza de fixtures de prueba desechables creados minutos antes. Verificado: conteos finales idénticos al baseline previo a la validación (Cliente 7, Transportista 3, Chofer 6, Vehículo 6); "losnanos" y "Transportista Demo A" intactos; `AuditLog` preservado íntegro como evidencia (72 eventos, incluidos los tres de esta ronda) — nunca se borra un `AuditLog`.
+
+### Deuda remanente
+
+- Detección proactiva en lote de CUIT para Clientes/Transportistas (CAT-1) sigue pendiente, sin relación con CAT-4.
+- La deuda operativa de variables de Postgres en Railway (ver CAT-3) sigue sin tocar, fuera del alcance de este bloque.
+- El ciclo completo de Transportista, Vehículo, la regla de PATCH mixto y los filtros de Auditoría Administrativa no tienen evidencia de validación visual contra la base en este cierre (ver "Validación manual local" arriba) — quedan cubiertos únicamente por las 73 pruebas automatizadas y por la auditoría técnica del bloque. Si se detecta algo inesperado en producción, revisar primero ahí.
+- El formulario rápido de alta de Chofer no captura teléfono (ver "Frontend" arriba) — deuda preexistente, no introducida por CAT-4, fuera de su alcance corregirla ahora.

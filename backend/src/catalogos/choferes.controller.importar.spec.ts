@@ -17,10 +17,17 @@ import { LIMITE_FILAS_IMPORTACION_CSV } from "../common/csv";
 // Transportista/Chofer solo se crean o editan a través de los DTO, que normalizan antes de
 // persistir. Las filas de los CSV de cada test, en cambio, usan a propósito formatos "humanos"
 // (con guiones) para probar que la normalización de extremo a extremo funciona.
+const ACTOR = { id: "user-1" };
+
 function crearArchivo(contenido: string): Express.Multer.File {
   return { buffer: Buffer.from(contenido, "utf-8") } as Express.Multer.File;
 }
 
+// CAT-4: transportista.findMany/chofer.findMany (resolución en lote) siguen corriendo fuera de
+// cualquier transacción, tal como antes — solo el create() por fila pasa a correr dentro de
+// $transaction(async (tx) => {...}) (entidad + AuditLog atómicos por fila). `crear` es la misma
+// referencia de jest.fn() sin importar si se invoca vía tx.chofer.create o (como antes) vía
+// prisma.chofer.create, así que las aserciones existentes sobre `crear` no cambian.
 function crearPrismaMock(
   opciones: {
     transportistas?: { id: string; cuit: string }[];
@@ -31,9 +38,11 @@ function crearPrismaMock(
   const transportistaFindMany = jest.fn().mockResolvedValue(opciones.transportistas ?? [{ id: "transp-1", cuit: "30111111111" }]);
   const choferFindMany = jest.fn().mockResolvedValue(opciones.choferesExistentes ?? []);
   const crear = opciones.crear ?? jest.fn().mockImplementation(({ data }) => Promise.resolve({ id: "nuevo", ...data }));
+  const tx = { chofer: { create: crear }, auditLog: { create: jest.fn().mockResolvedValue(undefined) } };
   const prisma = {
     transportista: { findMany: transportistaFindMany },
-    chofer: { findMany: choferFindMany, create: crear },
+    chofer: { findMany: choferFindMany },
+    $transaction: jest.fn((fn: any) => fn(tx)),
   } as unknown as OrganizacionPrismaClient;
   return { prisma, transportistaFindMany, choferFindMany, crear };
 }
@@ -42,13 +51,13 @@ describe("ChoferesController.importar (CAT-2/CAT-3)", () => {
   it("sin archivo adjunto, rechaza con BadRequestException", async () => {
     const { prisma } = crearPrismaMock();
     const controller = new ChoferesController(prisma);
-    await expect(controller.importar(undefined)).rejects.toThrow("Debe adjuntar un archivo CSV");
+    await expect(controller.importar(undefined, ACTOR)).rejects.toThrow("Debe adjuntar un archivo CSV");
   });
 
   it("archivo completamente vacío (ni encabezado) rechaza con BadRequestException, antes de cualquier consulta", async () => {
     const { prisma, transportistaFindMany, choferFindMany } = crearPrismaMock();
     const controller = new ChoferesController(prisma);
-    await expect(controller.importar(crearArchivo(""))).rejects.toThrow("El archivo está vacío.");
+    await expect(controller.importar(crearArchivo(""), ACTOR)).rejects.toThrow("El archivo está vacío.");
     expect(transportistaFindMany).not.toHaveBeenCalled();
     expect(choferFindMany).not.toHaveBeenCalled();
   });
@@ -57,7 +66,7 @@ describe("ChoferesController.importar (CAT-2/CAT-3)", () => {
     const { prisma } = crearPrismaMock();
     const controller = new ChoferesController(prisma);
     const archivo = crearArchivo("transportistaCuit,nombre,dni,cuil,comisionPct,licenciaNumero,licenciaVencimiento,telefono");
-    await expect(controller.importar(archivo)).rejects.toThrow("no tiene filas de datos");
+    await expect(controller.importar(archivo, ACTOR)).rejects.toThrow("no tiene filas de datos");
   });
 
   it("encabezado obligatorio ausente (falta 'cuil'): rechaza el archivo completo, sin consultar ni crear nada", async () => {
@@ -65,7 +74,7 @@ describe("ChoferesController.importar (CAT-2/CAT-3)", () => {
     const controller = new ChoferesController(prisma);
     const archivo = crearArchivo("transportistaCuit,nombre\n30-11111111-1,Juan Perez");
 
-    await expect(controller.importar(archivo)).rejects.toThrow("Faltan encabezados obligatorios");
+    await expect(controller.importar(archivo, ACTOR)).rejects.toThrow("Faltan encabezados obligatorios");
     expect(transportistaFindMany).not.toHaveBeenCalled();
     expect(choferFindMany).not.toHaveBeenCalled();
     expect(crear).not.toHaveBeenCalled();
@@ -76,7 +85,7 @@ describe("ChoferesController.importar (CAT-2/CAT-3)", () => {
     const controller = new ChoferesController(prisma);
     const archivo = crearArchivo("transportistaCuit,nombre,cuil,cuil\n30-11111111-1,Juan Perez,20-10000000-1,20-10000000-2");
 
-    await expect(controller.importar(archivo)).rejects.toThrow("encabezados duplicados");
+    await expect(controller.importar(archivo, ACTOR)).rejects.toThrow("encabezados duplicados");
     expect(crear).not.toHaveBeenCalled();
   });
 
@@ -89,7 +98,7 @@ describe("ChoferesController.importar (CAT-2/CAT-3)", () => {
         "30-11111111-1,Ana Lopez,,27-98765432-1,,,,",
     );
 
-    const resultado = await controller.importar(archivo);
+    const resultado = await controller.importar(archivo, ACTOR);
 
     expect(resultado.total).toBe(2);
     expect(resultado.creados).toBe(2);
@@ -121,7 +130,7 @@ describe("ChoferesController.importar (CAT-2/CAT-3)", () => {
       "transportistaCuit,nombre,cuil\n30-11111111-1,,20-30123456-4\n30-11111111-1,Ana Lopez,27-98765432-1",
     );
 
-    const resultado = await controller.importar(archivo);
+    const resultado = await controller.importar(archivo, ACTOR);
 
     expect(resultado.total).toBe(2);
     expect(resultado.creados).toBe(1);
@@ -137,7 +146,7 @@ describe("ChoferesController.importar (CAT-2/CAT-3)", () => {
     const controller = new ChoferesController(prisma);
     const archivo = crearArchivo("transportistaCuit,nombre,cuil\n30-99999999-9,Juan Perez,20-30123456-4");
 
-    const resultado = await controller.importar(archivo);
+    const resultado = await controller.importar(archivo, ACTOR);
 
     expect(resultado.creados).toBe(0);
     expect(resultado.rechazados).toBe(1);
@@ -154,7 +163,7 @@ describe("ChoferesController.importar (CAT-2/CAT-3)", () => {
     const controller = new ChoferesController(prisma);
     const archivo = crearArchivo("transportistaCuit,nombre,cuil\n30-77777777-7,Juan Perez,20-30123456-4");
 
-    const resultado = await controller.importar(archivo);
+    const resultado = await controller.importar(archivo, ACTOR);
 
     expect(resultado.rechazados).toBe(1);
     expect(resultado.detalle[0].mensaje).toContain("No existe un transportista con CUIT '30777777777'");
@@ -170,7 +179,7 @@ describe("ChoferesController.importar (CAT-2/CAT-3)", () => {
         "30111111111,Sin Guiones,20-10000000-2",
     );
 
-    const resultado = await controller.importar(archivo);
+    const resultado = await controller.importar(archivo, ACTOR);
 
     expect(resultado.creados).toBe(2);
     expect(resultado.rechazados).toBe(0);
@@ -184,7 +193,7 @@ describe("ChoferesController.importar (CAT-2/CAT-3)", () => {
     const controller = new ChoferesController(prisma);
     const archivo = crearArchivo("transportistaCuit,nombre,cuil\n30-11111111-1,Juan Perez,20-30123456-4");
 
-    const resultado = await controller.importar(archivo);
+    const resultado = await controller.importar(archivo, ACTOR);
 
     expect(resultado.rechazados).toBe(1);
     expect(resultado.detalle[0].mensaje).toContain("Ya existe un chofer con CUIL '20301234564'");
@@ -198,7 +207,7 @@ describe("ChoferesController.importar (CAT-2/CAT-3)", () => {
       "transportistaCuit,nombre,cuil\n30-11111111-1,Juan Perez,20-30123456-4\n30-11111111-1,Juan Perez Duplicado,20301234564",
     );
 
-    const resultado = await controller.importar(archivo);
+    const resultado = await controller.importar(archivo, ACTOR);
 
     expect(resultado.creados).toBe(1);
     expect(resultado.rechazados).toBe(1);
@@ -213,7 +222,7 @@ describe("ChoferesController.importar (CAT-2/CAT-3)", () => {
     const controller = new ChoferesController(prisma);
     const archivo = crearArchivo("transportistaCuit,nombre,dni,cuil\n30-11111111-1,Juan Perez,30.111.222,20-99999999-9");
 
-    const resultado = await controller.importar(archivo);
+    const resultado = await controller.importar(archivo, ACTOR);
 
     expect(resultado.rechazados).toBe(1);
     expect(resultado.detalle[0].mensaje).toContain("Ya existe un chofer con DNI '30111222'");
@@ -229,7 +238,7 @@ describe("ChoferesController.importar (CAT-2/CAT-3)", () => {
         "30-11111111-1,Otro Chofer,30111222,20-10000000-2",
     );
 
-    const resultado = await controller.importar(archivo);
+    const resultado = await controller.importar(archivo, ACTOR);
 
     expect(resultado.creados).toBe(1);
     expect(resultado.rechazados).toBe(1);
@@ -246,7 +255,7 @@ describe("ChoferesController.importar (CAT-2/CAT-3)", () => {
       "transportistaCuit,nombre,dni,cuil\n30-11111111-1,Uno,,20-10000000-1\n30-11111111-1,Dos,,20-10000000-2",
     );
 
-    const resultado = await controller.importar(archivo);
+    const resultado = await controller.importar(archivo, ACTOR);
 
     expect(resultado.creados).toBe(2);
     expect(crear).toHaveBeenCalledTimes(2);
@@ -261,7 +270,7 @@ describe("ChoferesController.importar (CAT-2/CAT-3)", () => {
       "transportistaCuit,nombre,cuil\n30-11111111-1,Uno, 20 30123456 4 \n30-11111111-1,Dos,20-30123456-4",
     );
 
-    const resultado = await controller.importar(archivo);
+    const resultado = await controller.importar(archivo, ACTOR);
 
     expect(resultado.creados).toBe(1);
     expect(resultado.rechazados).toBe(1);
@@ -273,7 +282,7 @@ describe("ChoferesController.importar (CAT-2/CAT-3)", () => {
     const controller = new ChoferesController(prisma);
     const archivo = crearArchivo("transportistaCuit,nombre,cuil,comisionPct\n30-11111111-1,Juan Perez,20-30123456-4,no-es-un-numero");
 
-    const resultado = await controller.importar(archivo);
+    const resultado = await controller.importar(archivo, ACTOR);
 
     expect(resultado.rechazados).toBe(1);
     expect(crear).not.toHaveBeenCalled();
@@ -284,7 +293,7 @@ describe("ChoferesController.importar (CAT-2/CAT-3)", () => {
     const controller = new ChoferesController(prisma);
     const archivo = crearArchivo("transportistaCuit,nombre,cuil,comisionPct\n30-11111111-1,Juan Perez,20-30123456-4,7.5");
 
-    const resultado = await controller.importar(archivo);
+    const resultado = await controller.importar(archivo, ACTOR);
 
     expect(resultado.creados).toBe(1);
     expect(crear).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ comisionPct: 7.5 }) }));
@@ -295,7 +304,7 @@ describe("ChoferesController.importar (CAT-2/CAT-3)", () => {
     const controller = new ChoferesController(prisma);
     const archivo = crearArchivo("transportistaCuit,nombre,cuil\n30-11111111-1,,");
 
-    const resultado = await controller.importar(archivo);
+    const resultado = await controller.importar(archivo, ACTOR);
 
     expect(resultado.rechazados).toBe(1);
     expect(crear).not.toHaveBeenCalled();
@@ -311,7 +320,7 @@ describe("ChoferesController.importar (CAT-2/CAT-3)", () => {
         "30-11111111-1,Tres,30100003,20-10000000-3",
     );
 
-    await controller.importar(archivo);
+    await controller.importar(archivo, ACTOR);
 
     expect(transportistaFindMany).toHaveBeenCalledTimes(1);
     expect(choferFindMany).toHaveBeenCalledTimes(1);
@@ -325,7 +334,7 @@ describe("ChoferesController.importar (CAT-2/CAT-3)", () => {
       "transportistaCuit,nombre,dni,cuil,comisionPct,licenciaNumero,licenciaVencimiento,telefono\n" + filas.join("\n"),
     );
 
-    const resultado = await controller.importar(archivo);
+    const resultado = await controller.importar(archivo, ACTOR);
 
     expect(resultado.total).toBe(LIMITE_FILAS_IMPORTACION_CSV);
     expect(resultado.creados).toBe(LIMITE_FILAS_IMPORTACION_CSV);
@@ -340,7 +349,7 @@ describe("ChoferesController.importar (CAT-2/CAT-3)", () => {
       "transportistaCuit,nombre,dni,cuil,comisionPct,licenciaNumero,licenciaVencimiento,telefono\n" + filas.join("\n"),
     );
 
-    await expect(controller.importar(archivo)).rejects.toThrow(`supera el límite de ${LIMITE_FILAS_IMPORTACION_CSV} filas`);
+    await expect(controller.importar(archivo, ACTOR)).rejects.toThrow(`supera el límite de ${LIMITE_FILAS_IMPORTACION_CSV} filas`);
     expect(transportistaFindMany).not.toHaveBeenCalled();
     expect(crear).not.toHaveBeenCalled();
   }, 30000);
@@ -362,7 +371,7 @@ describe("ChoferesController.importar (CAT-2/CAT-3)", () => {
       "transportistaCuit,nombre,cuil\n30-11111111-1,Uno,20-10000000-1\n30-11111111-1,Dos,20-10000000-2",
     );
 
-    const resultado = await controller.importar(archivo);
+    const resultado = await controller.importar(archivo, ACTOR);
 
     expect(resultado.creados).toBe(1);
     expect(resultado.rechazados).toBe(1);
@@ -383,7 +392,7 @@ describe("ChoferesController.importar (CAT-2/CAT-3)", () => {
       "transportistaCuit,nombre,cuil\n30-11111111-1,Uno,20-10000000-1\n30-11111111-1,Dos,20-10000000-2",
     );
 
-    const resultado = await controller.importar(archivo);
+    const resultado = await controller.importar(archivo, ACTOR);
 
     expect(resultado.creados).toBe(1);
     expect(resultado.rechazados).toBe(1);

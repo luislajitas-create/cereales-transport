@@ -8,16 +8,30 @@ import { validate } from "class-validator";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
 import { RolesGuard } from "../auth/roles.guard";
 import { Roles } from "../auth/roles.decorator";
+import { CurrentUser } from "../auth/current-user.decorator";
 import { ORGANIZACION_PRISMA } from "../prisma/organizacion-prisma.token";
 import { OrganizacionPrismaClient } from "../prisma/organizacion-prisma.client";
 import { encontrarOFallar } from "../common/encontrar-o-fallar";
 import { parsearCsv, filasComoObjetos, LIMITE_FILAS_IMPORTACION_CSV } from "../common/csv";
 import { mensajeErrorImportacion } from "../common/importacion-errores";
+import {
+  registrarAuditoria,
+  calcularCamposCambiados,
+  subconjunto,
+  marcarOrigenImportacionCsv,
+} from "../common/auditoria";
 import { CreateTransportistaDto } from "./dto/create-transportista.dto";
 import { UpdateTransportistaDto } from "./dto/update-transportista.dto";
 
 // CAT-1: mismas columnas de CreateTransportistaDto. Encabezados exactos esperados en el CSV.
 const PLANTILLA_TRANSPORTISTAS_CSV = 'razonSocial,cuit,domicilio\n"Transportista Ejemplo S.A.",30-12345678-9,"Av. Siempre Viva 123"\n';
+
+// CAT-4: entidad y allowlist de AuditLog — ver clientes.controller.ts para el criterio (CUIT
+// legible, organizacionId/id/relaciones afuera).
+const ENTIDAD_TRANSPORTISTA = "Transportista";
+function snapshotTransportista(t: { razonSocial: string; cuit: string; domicilio: string | null; activo: boolean }) {
+  return { razonSocial: t.razonSocial, cuit: t.cuit, domicilio: t.domicilio, activo: t.activo };
+}
 
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller("transportistas")
@@ -54,7 +68,7 @@ export class TransportistasController {
   @Roles("OPERACIONES", "ADMINISTRADOR")
   @Post("importar")
   @UseInterceptors(FileInterceptor("archivo", { limits: { fileSize: 2 * 1024 * 1024 } }))
-  async importar(@UploadedFile() archivo?: Express.Multer.File) {
+  async importar(@UploadedFile() archivo: Express.Multer.File | undefined, @CurrentUser() actor: any) {
     if (!archivo) throw new BadRequestException("Debe adjuntar un archivo CSV en el campo 'archivo'.");
     const filasCrudas = parsearCsv(archivo.buffer.toString("utf-8"));
     if (filasCrudas.length === 0) throw new BadRequestException("El archivo está vacío.");
@@ -84,8 +98,18 @@ export class TransportistasController {
         continue;
       }
       try {
-        await this.prisma.transportista.create({
-          data: { razonSocial: dto.razonSocial, cuit: dto.cuit, domicilio: dto.domicilio || null },
+        // CAT-4: entidad + AuditLog atómicos por fila — ver clientes.controller.ts.
+        await this.prisma.$transaction(async (tx) => {
+          const creado = await tx.transportista.create({
+            data: { razonSocial: dto.razonSocial, cuit: dto.cuit, domicilio: dto.domicilio || null },
+          });
+          await registrarAuditoria(tx, {
+            usuarioId: actor.id,
+            entidad: ENTIDAD_TRANSPORTISTA,
+            entidadId: creado.id,
+            accion: "transportista_creado",
+            datosNuevos: marcarOrigenImportacionCsv(snapshotTransportista(creado)),
+          });
         });
         creados++;
         detalle.push({ fila: numeroFila, ok: true, mensaje: "Creado correctamente." });
@@ -107,20 +131,76 @@ export class TransportistasController {
 
   @Roles("OPERACIONES", "ADMINISTRADOR")
   @Post()
-  create(@Body() body: CreateTransportistaDto) {
-    return this.prisma.transportista.create({ data: body });
+  create(@Body() body: CreateTransportistaDto, @CurrentUser() actor: any) {
+    return this.prisma.$transaction(async (tx) => {
+      const creado = await tx.transportista.create({ data: body });
+      await registrarAuditoria(tx, {
+        usuarioId: actor.id,
+        entidad: ENTIDAD_TRANSPORTISTA,
+        entidadId: creado.id,
+        accion: "transportista_creado",
+        datosNuevos: snapshotTransportista(creado),
+      });
+      return creado;
+    });
   }
 
   @Roles("OPERACIONES", "ADMINISTRADOR")
   @Patch(":id")
-  update(@Param("id") id: string, @Body() body: UpdateTransportistaDto) {
-    return this.prisma.transportista.update({ where: { id }, data: body });
+  update(@Param("id") id: string, @Body() body: UpdateTransportistaDto, @CurrentUser() actor: any) {
+    return this.prisma.$transaction(async (tx) => {
+      const actual = encontrarOFallar(await tx.transportista.findUnique({ where: { id } }), "Transportista no encontrado.");
+      const actualizado = await tx.transportista.update({ where: { id }, data: body });
+
+      const antes = snapshotTransportista(actual);
+      const despues = snapshotTransportista(actualizado);
+      const cambios = calcularCamposCambiados(antes, despues);
+      const cambioActivo = cambios.includes("activo");
+      const otrosCambios = cambios.filter((c) => c !== "activo");
+
+      if (cambioActivo) {
+        await registrarAuditoria(tx, {
+          usuarioId: actor.id,
+          entidad: ENTIDAD_TRANSPORTISTA,
+          entidadId: id,
+          accion: despues.activo ? "transportista_reactivado" : "transportista_desactivado",
+          datosAnteriores: { razonSocial: antes.razonSocial, activo: antes.activo },
+          datosNuevos: { razonSocial: despues.razonSocial, activo: despues.activo },
+        });
+      }
+      if (otrosCambios.length > 0) {
+        const claves = Array.from(new Set(["razonSocial", ...otrosCambios]));
+        await registrarAuditoria(tx, {
+          usuarioId: actor.id,
+          entidad: ENTIDAD_TRANSPORTISTA,
+          entidadId: id,
+          accion: "transportista_editado",
+          datosAnteriores: subconjunto(antes, claves),
+          datosNuevos: subconjunto(despues, claves),
+        });
+      }
+      return actualizado;
+    });
   }
 
   @Roles("OPERACIONES", "ADMINISTRADOR")
   @Delete(":id")
-  remove(@Param("id") id: string) {
-    return this.prisma.transportista.update({ where: { id }, data: { activo: false } });
+  remove(@Param("id") id: string, @CurrentUser() actor: any) {
+    return this.prisma.$transaction(async (tx) => {
+      const actual = encontrarOFallar(await tx.transportista.findUnique({ where: { id } }), "Transportista no encontrado.");
+      const actualizado = await tx.transportista.update({ where: { id }, data: { activo: false } });
+      if (actual.activo !== actualizado.activo) {
+        await registrarAuditoria(tx, {
+          usuarioId: actor.id,
+          entidad: ENTIDAD_TRANSPORTISTA,
+          entidadId: id,
+          accion: "transportista_desactivado",
+          datosAnteriores: { razonSocial: actual.razonSocial, activo: actual.activo },
+          datosNuevos: { razonSocial: actualizado.razonSocial, activo: actualizado.activo },
+        });
+      }
+      return actualizado;
+    });
   }
 
   @Get("export/excel")

@@ -2,22 +2,26 @@ import { Prisma } from "@prisma/client";
 import { TransportistasController } from "./transportistas.controller";
 import { OrganizacionPrismaClient } from "../prisma/organizacion-prisma.client";
 
+const ACTOR = { id: "user-1" };
+
 function crearArchivo(contenido: string): Express.Multer.File {
   return { buffer: Buffer.from(contenido, "utf-8") } as Express.Multer.File;
 }
 
+// CAT-4: importar() ahora crea cada fila dentro de $transaction(async (tx) => {...}) — ver
+// clientes.controller.importar.spec.ts.
 function crearPrismaMock(overrides: Partial<{ crear: jest.Mock }> = {}) {
+  const crear = overrides.crear ?? jest.fn().mockImplementation(({ data }) => Promise.resolve({ id: "nuevo", ...data }));
+  const tx = { transportista: { create: crear }, auditLog: { create: jest.fn().mockResolvedValue(undefined) } };
   return {
-    transportista: {
-      create: overrides.crear ?? jest.fn().mockImplementation(({ data }) => Promise.resolve({ id: "nuevo", ...data })),
-    },
+    $transaction: jest.fn((fn: any) => fn(tx)),
   } as unknown as OrganizacionPrismaClient;
 }
 
 describe("TransportistasController.importar (CAT-1)", () => {
   it("sin archivo adjunto, rechaza con BadRequestException", async () => {
     const controller = new TransportistasController(crearPrismaMock());
-    await expect(controller.importar(undefined)).rejects.toThrow("Debe adjuntar un archivo CSV");
+    await expect(controller.importar(undefined, ACTOR)).rejects.toThrow("Debe adjuntar un archivo CSV");
   });
 
   it("crea todas las filas válidas, con el CUIT normalizado, y devuelve el resumen correcto", async () => {
@@ -25,7 +29,7 @@ describe("TransportistasController.importar (CAT-1)", () => {
     const controller = new TransportistasController(crearPrismaMock({ crear }));
     const archivo = crearArchivo("razonSocial,cuit,domicilio\nTransportista Uno,30-11111111-1,Calle Falsa 123\nTransportista Dos,30.222.222.222,");
 
-    const resultado = await controller.importar(archivo);
+    const resultado = await controller.importar(archivo, ACTOR);
 
     expect(resultado.total).toBe(2);
     expect(resultado.creados).toBe(2);
@@ -43,7 +47,7 @@ describe("TransportistasController.importar (CAT-1)", () => {
     const controller = new TransportistasController(crearPrismaMock({ crear }));
     const archivo = crearArchivo("razonSocial,cuit\n,30-11111111-1\nTransportista Dos,30-22222222-2");
 
-    const resultado = await controller.importar(archivo);
+    const resultado = await controller.importar(archivo, ACTOR);
 
     expect(resultado.creados).toBe(1);
     expect(resultado.rechazados).toBe(1);
@@ -73,7 +77,7 @@ describe("TransportistasController.importar (CAT-1)", () => {
       "razonSocial,cuit\nTransportista Uno,30-11111111-1\nTransportista Uno Duplicado,30111111111",
     );
 
-    const resultado = await controller.importar(archivo);
+    const resultado = await controller.importar(archivo, ACTOR);
 
     expect(resultado.creados).toBe(1);
     expect(resultado.rechazados).toBe(1);
