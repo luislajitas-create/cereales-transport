@@ -383,7 +383,96 @@ Cifra de referencia del usuario al abrir CAT-4: 36 suites / 484 tests. Medido en
 
 ### Deuda remanente
 
-- Detección proactiva en lote de CUIT para Clientes/Transportistas (CAT-1) sigue pendiente, sin relación con CAT-4.
+- ~~Detección proactiva en lote de CUIT para Clientes/Transportistas (CAT-1)~~ — **cerrado por CAT-5** (ver sección abajo).
 - La deuda operativa de variables de Postgres en Railway (ver CAT-3) sigue sin tocar, fuera del alcance de este bloque.
 - El ciclo completo de Transportista, Vehículo, la regla de PATCH mixto y los filtros de Auditoría Administrativa no tienen evidencia de validación visual contra la base en este cierre (ver "Validación manual local" arriba) — quedan cubiertos únicamente por las 73 pruebas automatizadas y por la auditoría técnica del bloque. Si se detecta algo inesperado en producción, revisar primero ahí.
 - El formulario rápido de alta de Chofer no captura teléfono (ver "Frontend" arriba) — deuda preexistente, no introducida por CAT-4, fuera de su alcance corregirla ahora.
+
+## CAT-5 — Importación CSV eficiente y predecible de Clientes y Transportistas
+
+**Problema anterior (deuda documentada desde CAT-2):** `ClientesController.importar()` y `TransportistasController.importar()` no tenían ninguna detección proactiva de CUIT duplicado — a diferencia de Choferes/Vehículos (CAT-2), que sí resuelven duplicados en lote. Antes de CAT-5, un archivo con un CUIT ya existente o repetido dependía enteramente de que el `create()` real chocara contra la restricción única de Postgres (`P2002`): cero consultas de lectura antes del loop, pero una transacción completa (create + intento de `AuditLog`) abierta y revertida por cada fila condenada a fallar. El "duplicado dentro del archivo" solo funcionaba porque el procesamiento era secuencial — la primera fila ya estaba comprometida en la base cuando la segunda intentaba escribir — no por una comparación explícita. Tampoco existía `validarEncabezados()` (sí presente en CAT-2): un CSV con la columna `cuit` mal escrita fallaba fila por fila con un mensaje de DTO, en vez de rechazarse completo con un mensaje claro.
+
+### Algoritmo final (tres fases, sin consultas por fila)
+
+Implementado igual en `ClientesController.importar()` y `TransportistasController.importar()` (`backend/src/catalogos/`):
+
+1. **En memoria, sin tocar la base:** valida encabezados (`validarEncabezados()`, mismo criterio que CAT-2 — encabezados obligatorios ausentes o duplicados rechazan el archivo completo antes de leer una fila), límite de filas, y por cada fila válida según su DTO (`CreateClienteDto`/`CreateTransportistaDto`, con la normalización de CUIT de CAT-3 ya aplicada vía `@Transform`), detecta si el CUIT ya normalizado se repite dentro del propio archivo (`esDuplicadoEnArchivo()`, `backend/src/common/importacion-csv.ts`). Una fila cuyo DTO es inválido nunca llega a esta comparación, así que no "reserva" su CUIT — una fila válida posterior con el mismo CUIT puede crearse igual.
+2. **Una única consulta batch:** `cliente.findMany({ where: { cuit: { in: [...] } } })` (o `transportista.findMany`) por los CUIT de las filas que sobrevivieron la fase 1 — nunca `findUnique`/`findFirst` por fila, y nunca se ejecuta si no quedó ninguna fila candidata. Ya acotada a la organización activa por la extensión de aislamiento (Bloque 8.1.d): `organizacionId` nunca se lee del CSV ni del body, ni se agrega ningún filtro manual.
+3. **Creación en orden original:** cada fila candidata que no está en el conjunto de existentes se crea, en el mismo orden en que aparece en el archivo, con su `AuditLog` atómico (CAT-4). `P2002` durante este `create()` sigue existiendo como defensa final ante una condición de carrera real (otro proceso crea el mismo CUIT entre el paso 2 y el `create()`), traducido al mismo mensaje funcional seguro que ya usaba `mensajeErrorImportacion()` — nunca nombres de índice, `organizacionId`, SQL ni el mensaje crudo de Prisma.
+
+`detalle` se arma indexando cada resultado por la posición original de su fila (`resultados[i]`), no por el orden en que cada fase resuelve las filas — así el resumen sale siempre en el orden del archivo sin importar si una fila se rechazó en la fase 1, 2 o 3.
+
+### Cantidad de consultas vs. filas
+
+| | Antes de CAT-5 | Después de CAT-5 |
+|---|---|---|
+| Lecturas antes del loop | 0 | 1 (0 si no hay filas candidatas) |
+| Intentos de `create()` | 1 por cada fila con DTO válido (incluidas las condenadas a P2002) | 1 solo por fila que pasó ambos filtros (DTO + no-duplicada) |
+
+No hay N+1 en ningún punto: la única consulta de lectura es una sola por archivo completo, sin importar cuántas filas tenga (probado explícitamente — ver "Pruebas" abajo).
+
+### Normalización
+
+Reutiliza sin cambios `normalizarCuit()`/`siPresente()` de CAT-3, ya aplicados por `@Transform()` en `CreateClienteDto`/`CreateTransportistaDto`. CAT-5 no agrega ninguna normalización nueva — solo compara los valores que el DTO ya normalizó.
+
+### Semántica de primera aparición
+
+Sin cambios respecto del contrato histórico: la primera aparición válida de un CUIT dentro del archivo se crea; las apariciones posteriores del mismo CUIT (con cualquier formato) se rechazan con `"CUIT '<valor>' duplicado dentro del archivo."`. Probado explícitamente el caso límite: una primera fila inválida (por otro motivo, ej. `razonSocial` vacía) seguida de una segunda fila válida con el mismo CUIT — la segunda se crea, porque la primera nunca llegó a registrarse como "vista".
+
+### Condición de carrera y P2002
+
+La consulta batch de la fase 2 es una foto de un instante — no reemplaza la restricción única real de la base. Si dos procesos importan el mismo CUIT nuevo casi simultáneamente, ambos pueden pasar la fase 2 sin verse; el `create()` real de uno de los dos sigue protegido por `@@unique([organizacionId, cuit])` y su fallo se traduce con `mensajeErrorImportacion()` al mismo mensaje funcional que cualquier otro duplicado — nunca expone el error crudo de Prisma/Postgres. Probado con un mock que hace pasar la fase 2 (CUIT no encontrado) y falla igual el `create()` con P2002.
+
+### Atomicidad por fila (CAT-4, sin cambios de diseño)
+
+Cada fila creada sigue ejecutando `create()` + `registrarAuditoria()` dentro del mismo `$transaction` — si el `AuditLog` falla, esa fila no persiste; si el `create()` falla, no hay `AuditLog` huérfano. CAT-5 no toca este mecanismo, solo reduce cuántas filas llegan a intentarlo.
+
+### AuditLog
+
+`accion: "cliente_creado"` / `"transportista_creado"`, `datosNuevos._origen: "importacion_csv"` — mismo contrato de CAT-4, sin cambios. Una fila rechazada en cualquiera de las tres fases (inválida, duplicada en archivo, ya existente, o P2002) nunca genera `AuditLog`. No se agregó ningún evento agregado de lote — mismo criterio que CAT-4 (el modelo no tiene `batchId`, y un evento por fila con `_origen` ya alcanza).
+
+### Aislamiento multi-tenant
+
+`organizacionId` nunca se lee del CSV ni del body en ningún punto (los DTO ni siquiera tienen ese campo). La consulta batch de existentes se apoya exclusivamente en la extensión de aislamiento (Bloque 8.1.d, ya probada en `organizacion-prisma.client.spec.ts`) — CAT-5 no agrega ningún filtro manual de organización, ni podría comparar contra otra organización aunque quisiera, porque `findMany` ya viene acotado antes de que el controller vea el resultado.
+
+### Reutilización
+
+`backend/src/common/importacion-csv.ts` — `esDuplicadoEnArchivo(clave, vistasEnArchivo)`, una única función pura (no un framework): dado un `Set` compartido entre las filas de un mismo archivo, indica si una clave ya normalizada es la primera aparición o una repetición. Deliberadamente **no** se generalizó el patrón completo de tres fases en una utilidad común a las cuatro importaciones: Choferes/Vehículos (CAT-2) resuelven una relación externa (`transportistaCuit`) y comparan dos claves simultáneas (CUIL+DNI), una forma genuinamente distinta al caso de una sola clave y una sola entidad que cubre CAT-5 — forzar una abstracción común habría sido más compleja que el problema que resuelve. **No se modificó `ChoferesController` ni `VehiculosController`** — su lógica de duplicados en lote ya existía, ya está probada, y no comparte código con la nueva utilidad.
+
+### Frontend
+
+**Sin cambios.** El contrato de respuesta (`total`/`creados`/`rechazados`/`detalle`, cada `detalle[i]` con `fila`/`ok`/`mensaje`) es idéntico al anterior — la UI de importación en `Clientes.tsx`/`Transportistas.tsx` sigue funcionando sin ningún ajuste. No se encontró ningún defecto real de presentación que justificara tocar el frontend.
+
+### Pruebas incorporadas (33 tests nuevos, 1 suite nueva)
+
+- **`backend/src/common/importacion-csv.spec.ts`** (4 tests): primera aparición vs. repetición, clave vacía nunca es duplicado, claves distintas no interfieren.
+- **`clientes.controller.importar.spec.ts`** (20 tests, +14 sobre el baseline previo) y **`transportistas.controller.importar.spec.ts`** (19 tests, +15): archivo vacío; encabezados ausentes/duplicados; fila DTO inválida; CUIT duplicado exacto y con formato distinto dentro del archivo; primera fila inválida + segunda válida con el mismo CUIT; CUIT ya existente en la organización; aislamiento (un CUIT que la consulta batch no devuelve se trata como inexistente, sin comparación manual); la consulta de existentes se ejecuta exactamente una vez (y cero veces si no hay candidatas); mezcla completa de válidas/existentes/repetidas/inválidas con orden y conteos exactos; P2002 por condición de carrera traducido a mensaje funcional; error inesperado nunca expone detalles crudos; AuditLog por fila creada con `_origen`; fila rechazada sin AuditLog; fallo de AuditLog revierte solo esa fila y preserva las anteriores exitosas.
+- Se actualizaron (sin relajar su intención) los dos tests de CAT-4 en `clientes.controller.auditoria.spec.ts`/`transportistas.controller.auditoria.spec.ts` que mockeaban `importar()`, agregando el nuevo `findMany` batch a su mock — ninguna aserción de negocio se eliminó.
+- Ningún test previo de CAT-1/CAT-2/CAT-3/CAT-4 se relajó o eliminó; los dos tests de "duplicado dentro del archivo vía P2002" se actualizaron para reflejar la detección proactiva (ahora `create()` se llama una sola vez, no dos) — comportamiento intencionalmente mejorado, no una regresión.
+
+### Validación
+
+- `npm run test:dev1`: 14/14 ✅
+- Backend build: limpio
+- `npx jest --no-cache`: **43 suites / 602 tests, todos verdes** (baseline 42/569 + 1 suite/33 tests, reconciliado exacto)
+- Frontend `tsc -b` + `vite build`: limpios (CAT-5 no tocó ningún archivo de frontend)
+- `git diff --check`: sin errores
+
+### Validación manual local
+
+Ejecutada por Luis contra la base local, con verificación en base después de cada importación (dos rondas: la primera reveló un problema en la preparación de datos, no en el producto; la segunda quedó limpia).
+
+**Incidente en la preparación de la primera ronda (no un defecto de CAT-5):** el script usado para elegir un CUIT "ya existente" en la organización de prueba consultó con `PrismaClient` crudo, sin pasar por la extensión de aislamiento organizacional de la aplicación, y sin filtrar manualmente por organización — devolvió el primer registro de toda la tabla, que pertenecía a **otra** organización, no a la del usuario de prueba. Al importar ese CUIT, la fila se creó en vez de rechazarse — comportamiento **correcto**: `@@unique([organizacionId, cuit])` permite legítimamente el mismo CUIT en organizaciones distintas, y la consulta batch real del controller (correctamente acotada por la extensión) nunca debía tratarlo como duplicado. Confirmado con el propio `AuditLog` generado (organización, actor y `_origen` correctos) que la importación se comportó exactamente como debía. La segunda ronda se preparó filtrando explícitamente por la organización real del usuario de prueba antes de elegir los CUIT "existentes", y quedó limpia.
+
+**Clientes (segunda ronda, válida):** archivo de 4 filas → UI reportó **1 creado / 3 rechazados**, en el orden esperado: fila con CUIT nuevo creada; fila con el mismo CUIT en otro formato rechazada por "duplicado dentro del archivo"; fila con CUIT ya existente en la organización rechazada por "ya existe"; fila con razón social vacía rechazada por validación. Verificado en base: exactamente el Cliente esperado creado, ningún rastro de las tres filas rechazadas, un único `AuditLog` `cliente_creado` con `_origen: "importacion_csv"` y actor administrador correcto, cero eventos para las filas rechazadas.
+
+**Transportistas:** mismo patrón de 4 filas, mismo resultado UI (**1 creado / 3 rechazados**, mismo orden y motivos), misma verificación en base — exactamente igual de limpio.
+
+**Limpieza posterior:** se identificaron y eliminaron, por ID exacto y solo tras confirmar que cada uno coincidía en nombre/CUIT/organización con lo esperado, los registros funcionales de prueba de ambas rondas (incluidos los dos que quedaron creados por el incidente de preparación de la primera ronda) — verificadas cero dependencias antes de borrar. Los registros preexistentes usados como referencia de "ya existente" quedaron intactos, verificado campo por campo. Los `AuditLog` de las cuatro creaciones de prueba **se conservaron como evidencia**, sin excepción.
+
+### Limitaciones y deuda remanente
+
+- El límite de 2000 filas (`LIMITE_FILAS_IMPORTACION_CSV`) y el límite de tamaño de archivo (2 MB) no cambiaron — siguen siendo los mismos de CAT-1/CAT-2.
+- La detección de duplicados sigue siendo por CUIT únicamente (la única restricción `@@unique` real de Cliente/Transportista además de `id`) — no se agregó ninguna otra clave.
+- No se implementó ningún mecanismo de reintento automático ante P2002 — la fila se rechaza y debe volver a importarse manualmente, mismo criterio que Choferes/Vehículos.
+- No se tocó la deuda de CAT-3 (`Organizacion.cuit`/`Productor.cuit` sin normalizar) ni la de CAT-4 (Transportista/Vehículo/filtros sin validación visual, teléfono de Chofer) — fuera de alcance de este bloque.

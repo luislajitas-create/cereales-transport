@@ -12,8 +12,9 @@ import { CurrentUser } from "../auth/current-user.decorator";
 import { ORGANIZACION_PRISMA } from "../prisma/organizacion-prisma.token";
 import { OrganizacionPrismaClient } from "../prisma/organizacion-prisma.client";
 import { encontrarOFallar } from "../common/encontrar-o-fallar";
-import { parsearCsv, filasComoObjetos, LIMITE_FILAS_IMPORTACION_CSV } from "../common/csv";
+import { parsearCsv, filasComoObjetos, validarEncabezados, LIMITE_FILAS_IMPORTACION_CSV } from "../common/csv";
 import { mensajeErrorImportacion } from "../common/importacion-errores";
+import { esDuplicadoEnArchivo } from "../common/importacion-csv";
 import {
   registrarAuditoria,
   calcularCamposCambiados,
@@ -25,6 +26,10 @@ import { UpdateTransportistaDto } from "./dto/update-transportista.dto";
 
 // CAT-1: mismas columnas de CreateTransportistaDto. Encabezados exactos esperados en el CSV.
 const PLANTILLA_TRANSPORTISTAS_CSV = 'razonSocial,cuit,domicilio\n"Transportista Ejemplo S.A.",30-12345678-9,"Av. Siempre Viva 123"\n';
+
+// CAT-5: columnas sin las cuales ninguna fila podría procesarse (ambas @IsNotEmpty en
+// CreateTransportistaDto) — mismo criterio que Choferes/Vehículos (CAT-2).
+const ENCABEZADOS_OBLIGATORIOS_TRANSPORTISTAS = ["razonSocial", "cuit"];
 
 // CAT-4: entidad y allowlist de AuditLog — ver clientes.controller.ts para el criterio (CUIT
 // legible, organizacionId/id/relaciones afuera).
@@ -57,14 +62,11 @@ export class TransportistasController {
     res.send(PLANTILLA_TRANSPORTISTAS_CSV);
   }
 
-  // CAT-1 (importación masiva): mismo criterio que ClientesController.importar() — valida cada
-  // fila con CreateTransportistaDto (mismo DTO del alta individual), no bloquea el archivo
-  // completo ante una fila inválida. No verifica CUIT duplicado en lote (a diferencia de
-  // Choferes/Vehículos en CAT-2): create() tampoco lo hace hoy en el alta individual. Nota: el
-  // schema SÍ tiene @@unique([organizacionId, cuit]) en Transportista — un duplicado sigue
-  // rechazándose vía P2002 en el catch de abajo (mensajeErrorImportacion), solo que sin la
-  // detección proactiva en lote que sí tiene CAT-2. Ampliar esto es una mejora futura, fuera del
-  // alcance de este cierre (CAT-2 solo homologó el límite de filas y el manejo seguro de errores).
+  // CAT-1 (importación masiva), rehecha en CAT-5 para detección proactiva de duplicados — mismo
+  // criterio y misma estructura de tres fases que ClientesController.importar() (ver el
+  // comentario largo ahí): 1) DTO + duplicado dentro del archivo en memoria, sin tocar la base;
+  // 2) una única consulta batch de CUIT existentes; 3) crear en orden las filas candidatas
+  // sobrevivientes, entidad + AuditLog atómicos por fila, P2002 como defensa final ante carrera.
   @Roles("OPERACIONES", "ADMINISTRADOR")
   @Post("importar")
   @UseInterceptors(FileInterceptor("archivo", { limits: { fileSize: 2 * 1024 * 1024 } }))
@@ -72,6 +74,10 @@ export class TransportistasController {
     if (!archivo) throw new BadRequestException("Debe adjuntar un archivo CSV en el campo 'archivo'.");
     const filasCrudas = parsearCsv(archivo.buffer.toString("utf-8"));
     if (filasCrudas.length === 0) throw new BadRequestException("El archivo está vacío.");
+
+    const errorEncabezados = validarEncabezados(filasCrudas[0], ENCABEZADOS_OBLIGATORIOS_TRANSPORTISTAS);
+    if (errorEncabezados) throw new BadRequestException(errorEncabezados);
+
     const filasDeDatos = filasCrudas.length - 1;
     if (filasDeDatos === 0) throw new BadRequestException("El archivo no tiene filas de datos para importar.");
     if (filasDeDatos > LIMITE_FILAS_IMPORTACION_CSV) {
@@ -81,8 +87,10 @@ export class TransportistasController {
     }
     const filas = filasComoObjetos(filasCrudas);
 
-    const detalle: { fila: number; ok: boolean; mensaje: string }[] = [];
-    let creados = 0;
+    const resultados: ({ fila: number; ok: boolean; mensaje: string } | undefined)[] = new Array(filas.length);
+    const candidatas: { indice: number; numeroFila: number; dto: CreateTransportistaDto }[] = [];
+    const cuitsVistosEnArchivo = new Set<string>();
+
     for (let i = 0; i < filas.length; i++) {
       const numeroFila = i + 2;
       const registro = filas[i];
@@ -94,7 +102,26 @@ export class TransportistasController {
       const errores = await validate(dto);
       if (errores.length > 0) {
         const mensaje = errores.flatMap((e) => Object.values(e.constraints || {})).join("; ");
-        detalle.push({ fila: numeroFila, ok: false, mensaje });
+        resultados[i] = { fila: numeroFila, ok: false, mensaje };
+        continue;
+      }
+      if (esDuplicadoEnArchivo(dto.cuit, cuitsVistosEnArchivo)) {
+        resultados[i] = { fila: numeroFila, ok: false, mensaje: `CUIT '${dto.cuit}' duplicado dentro del archivo.` };
+        continue;
+      }
+      candidatas.push({ indice: i, numeroFila, dto });
+    }
+
+    const cuitsCandidatos = candidatas.map((c) => c.dto.cuit);
+    const existentes = cuitsCandidatos.length
+      ? await this.prisma.transportista.findMany({ where: { cuit: { in: cuitsCandidatos } }, select: { cuit: true } })
+      : [];
+    const cuitsEnBase = new Set(existentes.map((e) => e.cuit));
+
+    let creados = 0;
+    for (const { indice, numeroFila, dto } of candidatas) {
+      if (cuitsEnBase.has(dto.cuit)) {
+        resultados[indice] = { fila: numeroFila, ok: false, mensaje: `Ya existe un transportista con CUIT '${dto.cuit}' en esta organización.` };
         continue;
       }
       try {
@@ -112,11 +139,14 @@ export class TransportistasController {
           });
         });
         creados++;
-        detalle.push({ fila: numeroFila, ok: true, mensaje: "Creado correctamente." });
+        resultados[indice] = { fila: numeroFila, ok: true, mensaje: "Creado correctamente." };
       } catch (error) {
-        detalle.push({ fila: numeroFila, ok: false, mensaje: mensajeErrorImportacion(error) });
+        // CAT-5: última defensa ante concurrencia — ver clientes.controller.ts.
+        resultados[indice] = { fila: numeroFila, ok: false, mensaje: mensajeErrorImportacion(error) };
       }
     }
+
+    const detalle = resultados.map((r) => r as { fila: number; ok: boolean; mensaje: string });
     return { total: filas.length, creados, rechazados: filas.length - creados, detalle };
   }
 

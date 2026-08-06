@@ -138,7 +138,12 @@ describe("TransportistasController — auditoría (CAT-4)", () => {
     it("cada fila creada genera su propio AuditLog marcado con origen 'importacion_csv'", async () => {
       const crear = jest.fn().mockImplementation(({ data }) => Promise.resolve({ id: "transp-csv-1", activo: true, ...data }));
       const tx = { transportista: { create: crear }, auditLog: { create: jest.fn().mockResolvedValue(undefined) } };
-      const prisma = { $transaction: jest.fn((fn: any) => fn(tx)) } as unknown as OrganizacionPrismaClient;
+      // CAT-5: importar() ahora hace un transportista.findMany batch (CUIT existentes) antes del
+      // loop — acá siempre vacío, no es el foco de estas pruebas de AuditLog.
+      const prisma = {
+        transportista: { findMany: jest.fn().mockResolvedValue([]) },
+        $transaction: jest.fn((fn: any) => fn(tx)),
+      } as unknown as OrganizacionPrismaClient;
       const controller = new TransportistasController(prisma);
       const archivo = { buffer: Buffer.from("razonSocial,cuit\nTransp CSV,30-11111111-1", "utf-8") } as Express.Multer.File;
 
@@ -153,7 +158,12 @@ describe("TransportistasController — auditoría (CAT-4)", () => {
     it("fila inválida: no crea entidad ni AuditLog, no bloquea las filas válidas restantes", async () => {
       const crear = jest.fn().mockImplementation(({ data }) => Promise.resolve({ id: "transp-csv", activo: true, ...data }));
       const tx = { transportista: { create: crear }, auditLog: { create: jest.fn().mockResolvedValue(undefined) } };
-      const prisma = { $transaction: jest.fn((fn: any) => fn(tx)) } as unknown as OrganizacionPrismaClient;
+      // CAT-5: importar() ahora hace un transportista.findMany batch (CUIT existentes) antes del
+      // loop — acá siempre vacío, no es el foco de estas pruebas de AuditLog.
+      const prisma = {
+        transportista: { findMany: jest.fn().mockResolvedValue([]) },
+        $transaction: jest.fn((fn: any) => fn(tx)),
+      } as unknown as OrganizacionPrismaClient;
       const controller = new TransportistasController(prisma);
       const archivo = { buffer: Buffer.from("razonSocial,cuit\n,30-11111111-1\nTransp Dos,30-22222222-2", "utf-8") } as Express.Multer.File;
 

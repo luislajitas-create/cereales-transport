@@ -208,7 +208,12 @@ describe("ClientesController — auditoría (CAT-4)", () => {
   describe("importar() — atomicidad por fila", () => {
     function crearPrismaImportar(crear: jest.Mock) {
       const tx = { cliente: { create: crear }, auditLog: { create: jest.fn().mockResolvedValue(undefined) } };
-      const prisma = { $transaction: jest.fn((fn: any) => fn(tx)) } as unknown as OrganizacionPrismaClient;
+      // CAT-5: importar() ahora hace un cliente.findMany batch (CUIT existentes) antes del loop —
+      // acá siempre vacío, no es el foco de estas pruebas de AuditLog.
+      const prisma = {
+        cliente: { findMany: jest.fn().mockResolvedValue([]) },
+        $transaction: jest.fn((fn: any) => fn(tx)),
+      } as unknown as OrganizacionPrismaClient;
       return { prisma, tx };
     }
 
@@ -253,7 +258,10 @@ describe("ClientesController — auditoría (CAT-4)", () => {
           .mockRejectedValueOnce(new Error("fallo simulado de auditoría")), // fila 2: falla
       };
       const tx = { cliente: { create: crear }, auditLog };
-      const prisma = { $transaction: jest.fn((fn: any) => fn(tx)) } as unknown as OrganizacionPrismaClient;
+      const prisma = {
+        cliente: { findMany: jest.fn().mockResolvedValue([]) },
+        $transaction: jest.fn((fn: any) => fn(tx)),
+      } as unknown as OrganizacionPrismaClient;
       const controller = new ClientesController(prisma);
       const archivo = {
         buffer: Buffer.from("razonSocial,cuit\nCliente Uno,30-11111111-1\nCliente Dos,30-22222222-2", "utf-8"),

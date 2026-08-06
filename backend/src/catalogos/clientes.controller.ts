@@ -12,8 +12,9 @@ import { CurrentUser } from "../auth/current-user.decorator";
 import { ORGANIZACION_PRISMA } from "../prisma/organizacion-prisma.token";
 import { OrganizacionPrismaClient } from "../prisma/organizacion-prisma.client";
 import { encontrarOFallar } from "../common/encontrar-o-fallar";
-import { parsearCsv, filasComoObjetos, LIMITE_FILAS_IMPORTACION_CSV } from "../common/csv";
+import { parsearCsv, filasComoObjetos, validarEncabezados, LIMITE_FILAS_IMPORTACION_CSV } from "../common/csv";
 import { mensajeErrorImportacion } from "../common/importacion-errores";
+import { esDuplicadoEnArchivo } from "../common/importacion-csv";
 import {
   registrarAuditoria,
   calcularCamposCambiados,
@@ -31,6 +32,11 @@ function fmtMoney(n: number) {
 // dato plano de fila de CSV; se crea sin contactos, se agregan después individualmente si hace
 // falta). Encabezados exactos esperados en el CSV subido.
 const PLANTILLA_CLIENTES_CSV = 'razonSocial,cuit,condicionesComerciales\n"Cliente Ejemplo S.A.",30-12345678-9,"Pago a 30 días"\n';
+
+// CAT-5: columnas sin las cuales ninguna fila podría procesarse (ambas @IsNotEmpty en
+// CreateClienteDto) — mismo criterio que Choferes/Vehículos (CAT-2): se rechaza el archivo
+// completo por encabezado inválido antes de leer una sola fila.
+const ENCABEZADOS_OBLIGATORIOS_CLIENTES = ["razonSocial", "cuit"];
 
 // CAT-4: entidad y allowlist de AuditLog. CUIT queda legible (identificador comercial, no
 // personal). organizacionId/id/contactos (relación anidada) quedan afuera a propósito — nunca se
@@ -64,14 +70,24 @@ export class ClientesController {
     res.send(PLANTILLA_CLIENTES_CSV);
   }
 
-  // CAT-1 (importación masiva): cada fila se valida con el mismo CreateClienteDto que usa el
-  // alta individual (misma regla, no se reimplementa nada) y se procesa de forma independiente
-  // — una fila inválida o que falle al crear no aborta el archivo completo ni las demás filas
-  // válidas. No se verifica CUIT duplicado en lote (a diferencia de Choferes/Vehículos en CAT-2):
-  // el alta individual tampoco lo hace hoy. Nota: el schema SÍ tiene
-  // @@unique([organizacionId, cuit]) en Cliente — un duplicado sigue rechazándose vía P2002 en el
-  // catch de abajo (mensajeErrorImportacion), solo que sin la detección proactiva en lote. Ampliar
-  // esto es una mejora futura, fuera del alcance de este cierre.
+  // CAT-1 (importación masiva), rehecha en CAT-5 para detección proactiva de duplicados: cada
+  // fila se valida con el mismo CreateClienteDto que usa el alta individual y se procesa de forma
+  // independiente — una fila inválida no aborta el archivo ni bloquea las demás. Tres fases, sin
+  // consultas por fila:
+  //   1. En memoria: valida DTO de cada fila y detecta CUIT repetido DENTRO del archivo (ya
+  //      normalizado por el DTO). Una fila inválida nunca "reserva" su CUIT — si su DTO no pasa,
+  //      ni siquiera llega a la detección de duplicados, así que una fila válida posterior con el
+  //      mismo CUIT puede crearse igual.
+  //   2. Una única consulta batch (`cliente.findMany` con `cuit: { in: [...] }`) por los CUIT de
+  //      las filas candidatas — nunca un `findUnique`/`findFirst` por fila. Ya acotada a la
+  //      organización activa por la extensión de aislamiento (Bloque 8.1.d): nunca compara contra
+  //      otra organización, y `organizacionId` nunca se lee del CSV ni del body.
+  //   3. Crea, en el orden original del archivo, cada fila candidata que sobrevivió ambos
+  //      filtros — entidad + AuditLog atómicos por fila (CAT-4), P2002 como última defensa ante
+  //      una condición de carrera real (otro proceso crea el mismo CUIT entre el paso 2 y el
+  //      create()), nunca expone detalles internos (mensajeErrorImportacion).
+  // `resultados` se indexa por la posición original de cada fila para que `detalle` salga siempre
+  // en el orden del archivo, sin importar en qué fase se resolvió cada una.
   @Roles("OPERACIONES", "FACTURACION", "ADMINISTRADOR")
   @Post("importar")
   @UseInterceptors(FileInterceptor("archivo", { limits: { fileSize: 2 * 1024 * 1024 } }))
@@ -79,6 +95,10 @@ export class ClientesController {
     if (!archivo) throw new BadRequestException("Debe adjuntar un archivo CSV en el campo 'archivo'.");
     const filasCrudas = parsearCsv(archivo.buffer.toString("utf-8"));
     if (filasCrudas.length === 0) throw new BadRequestException("El archivo está vacío.");
+
+    const errorEncabezados = validarEncabezados(filasCrudas[0], ENCABEZADOS_OBLIGATORIOS_CLIENTES);
+    if (errorEncabezados) throw new BadRequestException(errorEncabezados);
+
     const filasDeDatos = filasCrudas.length - 1;
     if (filasDeDatos === 0) throw new BadRequestException("El archivo no tiene filas de datos para importar.");
     if (filasDeDatos > LIMITE_FILAS_IMPORTACION_CSV) {
@@ -88,8 +108,10 @@ export class ClientesController {
     }
     const filas = filasComoObjetos(filasCrudas);
 
-    const detalle: { fila: number; ok: boolean; mensaje: string }[] = [];
-    let creados = 0;
+    const resultados: ({ fila: number; ok: boolean; mensaje: string } | undefined)[] = new Array(filas.length);
+    const candidatas: { indice: number; numeroFila: number; dto: CreateClienteDto }[] = [];
+    const cuitsVistosEnArchivo = new Set<string>();
+
     for (let i = 0; i < filas.length; i++) {
       const numeroFila = i + 2; // fila 1 es el encabezado
       const registro = filas[i];
@@ -101,7 +123,26 @@ export class ClientesController {
       const errores = await validate(dto);
       if (errores.length > 0) {
         const mensaje = errores.flatMap((e) => Object.values(e.constraints || {})).join("; ");
-        detalle.push({ fila: numeroFila, ok: false, mensaje });
+        resultados[i] = { fila: numeroFila, ok: false, mensaje };
+        continue;
+      }
+      if (esDuplicadoEnArchivo(dto.cuit, cuitsVistosEnArchivo)) {
+        resultados[i] = { fila: numeroFila, ok: false, mensaje: `CUIT '${dto.cuit}' duplicado dentro del archivo.` };
+        continue;
+      }
+      candidatas.push({ indice: i, numeroFila, dto });
+    }
+
+    const cuitsCandidatos = candidatas.map((c) => c.dto.cuit);
+    const existentes = cuitsCandidatos.length
+      ? await this.prisma.cliente.findMany({ where: { cuit: { in: cuitsCandidatos } }, select: { cuit: true } })
+      : [];
+    const cuitsEnBase = new Set(existentes.map((e) => e.cuit));
+
+    let creados = 0;
+    for (const { indice, numeroFila, dto } of candidatas) {
+      if (cuitsEnBase.has(dto.cuit)) {
+        resultados[indice] = { fila: numeroFila, ok: false, mensaje: `Ya existe un cliente con CUIT '${dto.cuit}' en esta organización.` };
         continue;
       }
       try {
@@ -121,11 +162,16 @@ export class ClientesController {
           });
         });
         creados++;
-        detalle.push({ fila: numeroFila, ok: true, mensaje: "Creado correctamente." });
+        resultados[indice] = { fila: numeroFila, ok: true, mensaje: "Creado correctamente." };
       } catch (error) {
-        detalle.push({ fila: numeroFila, ok: false, mensaje: mensajeErrorImportacion(error) });
+        // CAT-5: última defensa ante concurrencia (otro proceso crea el mismo CUIT entre la
+        // consulta batch de arriba y este create()) — mismo mensaje funcional seguro que
+        // cualquier otro rechazo, nunca el error crudo de Prisma/Postgres.
+        resultados[indice] = { fila: numeroFila, ok: false, mensaje: mensajeErrorImportacion(error) };
       }
     }
+
+    const detalle = resultados.map((r) => r as { fila: number; ok: boolean; mensaje: string });
     return { total: filas.length, creados, rechazados: filas.length - creados, detalle };
   }
 
