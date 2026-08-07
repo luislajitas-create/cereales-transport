@@ -629,9 +629,144 @@ Ejecutada en `Organización Principal` (una de las 3 organizaciones locales con 
 
 ### Deuda remanente
 
-- `Productor` sigue sin `AuditLog` — brecha real, pero de trazabilidad, no de normalización; agregarla es una ampliación de alcance explícita que CAT-6 no pidió.
+- ~~`Productor` sigue sin `AuditLog`~~ — **cerrado por CAT-7** (ver sección abajo): `create()`/`update()` auditan `productor_creado`/`productor_editado`.
 - La migración `20260806185149_normalizacion_cuit_organizacion_productor_cat6` está aplicada localmente pero **no en producción** — se aplicará automáticamente vía `preDeployCommand` de Railway (`npx prisma migrate deploy`) cuando se autorice el push de este bloque, igual que CAT-3.
 - Frontend sin infraestructura de tests de componentes (deuda preexistente, no introducida ni ampliada por CAT-6) — `construirValorCampo()`/`construirPayloadOrganizacion()` quedan cubiertas por revisión de función + `tsc -b`/`vite build` + los 13 tests nativos (`organizacion-payload.test.mjs`) + validación manual, no por un framework de tests de componentes.
 - **3 organizaciones locales con CUIT canónico pero dígito verificador matemáticamente inválido** (incluidas las dos organizaciones demo del seed histórico) — no se corrigieron automáticamente, por instrucción explícita. Quedan editables (nombre/domicilio/etc.) gracias a la corrección de `Organizacion.tsx`; corregir su CUIT específico, si hiciera falta, requiere una acción manual explícita desde la propia pantalla de Organización, no una migración ni un script.
 - La deuda de CAT-4 (Transportista/Vehículo/filtros sin validación visual, teléfono de Chofer) sigue sin tocar, sin relación con CAT-6.
-- **`AuditLog` de Organización audita el snapshot completo del registro (`datosAnteriores`/`datosNuevos` con las 9 columnas de `SELECT_ORGANIZACION`), no un diff de los campos realmente modificados** — comportamiento preexistente de `OrganizacionController.actualizar()` (Bloque 9.4, anterior a CAT-6), verificado durante la validación manual de CAT-6: al editar únicamente `domicilio`, el evento igual incluye `cuit`/`email` como claves (con el mismo valor a ambos lados, sin cambio real ni dato ficticio, solo no minimizado). CAT-6 no lo modificó por instrucción explícita ("no alterar acciones existentes"). Queda como deuda futura evaluar snapshots por diferencias (minimización), consistente con el patrón ya usado por CAT-4 en Cliente/Transportista/Chofer/Vehículo, que sí audita solo los campos cambiados.
+- **`AuditLog` de Organización audita el snapshot completo del registro (`datosAnteriores`/`datosNuevos` con las 9 columnas de `SELECT_ORGANIZACION`), no un diff de los campos realmente modificados** — comportamiento preexistente de `OrganizacionController.actualizar()` (Bloque 9.4, anterior a CAT-6), verificado durante la validación manual de CAT-6: al editar únicamente `domicilio`, el evento igual incluye `cuit`/`email` como claves (con el mismo valor a ambos lados, sin cambio real ni dato ficticio, solo no minimizado). CAT-6 no lo modificó por instrucción explícita ("no alterar acciones existentes"). Queda como deuda futura evaluar snapshots por diferencias (minimización), consistente con el patrón ya usado por CAT-4 en Cliente/Transportista/Chofer/Vehículo, que sí audita solo los campos cambiados. **Fuera de alcance de CAT-7 por instrucción explícita** (ver sección de abajo).
+
+## CAT-7 — Auditoría integral de catálogos simples
+
+**Objetivo:** cerrar la brecha de trazabilidad de Cereal/Ubicación/Tipo de gasto/Productor (CAT-4 cubrió Cliente/Transportista/Chofer/Vehículo; CAT-6 dejó documentado que Productor seguía sin `AuditLog`).
+
+### Matriz inicial (obligatoria antes de escribir código)
+
+Los cuatro catálogos comparten un único archivo (`backend/src/catalogos/simples.controller.ts`), pero son **cuatro controllers separados** (`CerealesController`, `UbicacionesController`, `TiposGastoController`, `ProductoresController`), no un controller genérico.
+
+| | Cereal | Ubicación | Tipo de gasto | Productor |
+|---|---|---|---|---|
+| Endpoint | `/cereales` | `/ubicaciones` | `/tipos-gasto` | `/productores` |
+| Crear | `POST` | `POST` | `POST` | `POST` |
+| Editar | no existe | no existe | no existe | `PATCH` |
+| Desactivar/Reactivar | no existe | no existe | no existe | no existe |
+| Borrar (físico o lógico) | no existe | no existe | no existe | no existe |
+| Columna `activo` en schema | no tiene | no tiene | no tiene | no tiene |
+| Roles crear/editar | OPERACIONES, ADMINISTRADOR | OPERACIONES, ADMINISTRADOR | OPERACIONES, **LIQUIDACIONES**, ADMINISTRADOR | OPERACIONES, ADMINISTRADOR |
+| Roles listar | ninguno (LECTURA incluida) | ninguno | ninguno | ninguno |
+| Control visible en frontend | solo alta (`Catalogos.tsx`) | solo alta | solo alta | solo alta — el `PATCH` existía en el backend pero ninguna pantalla lo usaba |
+| AuditLog previo a CAT-7 | ninguno | ninguno | ninguno | ninguno |
+| Transacción previa a CAT-7 | ninguna (`create()` directo) | ninguna | ninguna | ninguna |
+| DTO / campos editables | `nombre` | `nombre`, `tipo` (enum), `localidad?` | `nombre`, `afectaLiquidacion?` | `nombre`, `cuit?` (CAT-6), `localidad?` |
+| Restricción única | `(organizacionId, nombre)` | ninguna | `(organizacionId, nombre)` | `(organizacionId, cuit)` |
+| Relaciones/dependencias | `viajes[]` (Restrict) | `viajesOrigen[]`/`viajesDestino[]` (Restrict) | `anticipos[]`/`movimientos[]` (Restrict) | `viajes[]` (Restrict) |
+| Aislamiento organizacional | automático (`ORGANIZACIONAL_MODELS`) | automático | automático | automático |
+
+### Decisión de producto consultada y resuelta
+
+El pedido original de CAT-7 asumía acciones `_desactivado`/`_reactivado` para los cuatro catálogos y edición para Cereal/Ubicación/Tipo de gasto. La matriz de arriba demostró que **esa funcionalidad no existe en ningún punto del sistema real**: ningún modelo tiene columna `activo`, ningún controller tiene `@Patch`/`@Delete` salvo `ProductoresController.update()`. Se consultó explícitamente y el usuario autorizó auditar **exclusivamente lo que existe hoy**: alta en los cuatro catálogos, edición solo en Productor. No se inventó ningún endpoint, columna ni acción de estado — decisión de producto, no ambigüedad técnica.
+
+### Acciones implementadas
+
+Solo las que corresponden a operaciones realmente disponibles:
+
+- `cereal_creado`
+- `ubicacion_creada`
+- `tipo_gasto_creado`
+- `productor_creado`, `productor_editado`
+
+Sin acciones de estado/baja para ninguna de las cuatro entidades — no existe la operación que las generaría.
+
+### Atomicidad
+
+Mismo patrón que CAT-4: cada mutación y su `AuditLog` corren dentro de un único `this.prisma.$transaction(async (tx) => ...)`. `usuarioId` viene exclusivamente de `@CurrentUser()` (nunca del body — ninguno de los cuatro DTO tiene ese campo). `organizacionId` nunca se lee ni se agrega manualmente — lo inyecta `ORGANIZACION_PRISMA` (los cuatro modelos ya estaban en `ORGANIZACIONAL_MODELS` desde antes de CAT-7). No se modificó la extensión de aislamiento.
+
+`ProductoresController.update()` sigue el mismo patrón de `ClientesController.update()` (CAT-4): `encontrarOFallar(await tx.productor.findUnique(...))` para el "antes" (dentro del mismo `tx`, nunca una lectura manual sin scope) → `tx.productor.update()` → `calcularCamposCambiados()` sobre los snapshots por allowlist → un único evento `productor_editado` si hubo cambios reales. Al no existir columna `activo` en `Productor`, nunca hay la rama de "dos eventos" que sí aplica en Cliente/Transportista/Chofer/Vehículo — un `PATCH` de Productor genera como máximo un evento.
+
+### Helper reutilizado
+
+Sin helper nuevo: `registrarAuditoria`, `sanitizarParaAuditoria`, `calcularCamposCambiados`, `subconjunto`, todos de `backend/src/common/auditoria.ts` (CAT-4), importados sin modificar.
+
+### Snapshots por allowlist
+
+Ningún objeto Prisma completo se serializa. Por entidad (siempre excluye `id`/`organizacionId`/relaciones/timestamps):
+
+- **Cereal:** `{ nombre }` — único campo funcional del modelo.
+- **Ubicación:** `{ nombre, tipo, localidad }`.
+- **Tipo de gasto:** `{ nombre, afectaLiquidacion }`.
+- **Productor:** `{ nombre, cuit, localidad }` — el CUIT llega ya canónico (solo dígitos) o `null` desde el DTO (`normalizarCuitOpcional`, CAT-6) antes de construir el snapshot; nunca se normaliza en el controller ni en el helper de auditoría.
+
+Eventos de edición (Productor): solo los campos de `calcularCamposCambiados()` más `nombre` como identificador estable (mismo criterio que `razonSocial` en `ClientesController`), aunque no haya cambiado.
+
+### Errores y duplicados
+
+Sin cambios de infraestructura: `PrismaExceptionFilter`/`mensajeUnico()` (CAT-3) siguen traduciendo cualquier P2002 real a un mensaje funcional, sin exponer Prisma/índices/`organizacionId`. Verificado explícitamente por test que un P2002 real en `create()`/`update()` se propaga sin generar ningún `AuditLog` (la transacción aborta antes de llegar a `registrarAuditoria`). La normalización de CUIT de CAT-6 y los roles/gating de SEC-UI-1 no se tocaron.
+
+### Frontend
+
+`AuditoriaAdministrativa.tsx` obtiene entidades/acciones dinámicamente desde `GET /api/v1/organizacion/auditoria/opciones` (`organizacion.controller.ts`, `auditoriaOpciones()`), que arma las listas con `auditLog.groupBy(["entidad"])`/`groupBy(["accion"])` sobre los datos reales — **sin hardcodear ninguna lista**. Confirmado por lectura de código: `Cereal`/`cereal_creado`, `Ubicacion`/`ubicacion_creada`, `TipoGasto`/`tipo_gasto_creado`, `Productor`/`productor_creado`/`productor_editado` aparecerán como opciones de filtro automáticamente en cuanto existan eventos reales, sin ningún cambio de código en ese archivo.
+
+`Catalogos.tsx` no se tocó — conserva exactamente los mismos controles, roles/gating (`puedeGestionarCatalogosBase`/`puedeGestionarTiposGasto`), mensajes, alta-únicamente y orden de listado que tenía antes de CAT-7. No se agregó búsqueda, importación, edición ni ninguna función nueva.
+
+### Backend — archivos tocados
+
+- `backend/src/catalogos/simples.controller.ts` — `create()` de las cuatro entidades y `update()` de Productor reescritos con `$transaction` + `registrarAuditoria`; `@CurrentUser()` agregado a las cuatro firmas de escritura; `encontrarOFallar` agregado al `update()` de Productor (antes hacía `update()` directo, sin 404 explícito).
+- `backend/src/catalogos/simples.controller.productor.spec.ts` — adaptado a la nueva firma (`actor` como segundo/tercer argumento) y al mock basado en `tx`; mismas aserciones de CUIT canónico y propagación de P2002 que ya existían desde CAT-6.
+- `backend/src/catalogos/simples.controller.auditoria.spec.ts` — nuevo, cobertura completa de AuditLog para las cuatro entidades.
+
+`simples.roles.spec.ts` no se modificó — sigue leyendo los decoradores `@Roles()` reales vía `Reflector`, sin invocar el cuerpo de los métodos, así que la firma nueva no lo afecta.
+
+### Pruebas incorporadas (1 suite nueva / 18 tests nuevos en Jest backend)
+
+**`simples.controller.auditoria.spec.ts`** (18 tests):
+- Cereal (4): `create()` genera `cereal_creado` con snapshot por allowlist; `create()` nunca envía `organizacionId` manual; fallo de `auditLog.create` rechaza `create()` completo; P2002 se propaga sin generar `AuditLog`.
+- Ubicación (2): `create()` genera `ubicacion_creada` con `tipo`/`localidad` en el snapshot, nunca `id`/`organizacionId`; fallo de `auditLog.create` rechaza `create()` completo.
+- Tipo de gasto (2): `create()` genera `tipo_gasto_creado` con `afectaLiquidacion`; P2002 se propaga sin generar `AuditLog`.
+- Productor — `create()` (3): evento `productor_creado` con CUIT canónico; CUIT ausente se audita `null` (nunca `""` ni omitido en silencio); fallo de `auditLog.create` rechaza `create()` completo.
+- Productor — `update()` (7): edición real → único evento `productor_editado` con antes/después reales; PATCH idempotente → cero eventos; CUIT editado/vaciado se audita canónico/`null`; productor inexistente → `NotFoundException`, cero `update()`, cero `AuditLog`; fallo de `auditLog.create` rechaza `update()` completo; el "antes" se lee del mismo `tx` (nunca sin scope); P2002 en `update()` se propaga sin generar `AuditLog`.
+
+Mismo alcance honesto que `clientes.controller.auditoria.spec.ts` (CAT-4): estas pruebas demuestran que un fallo de `auditLog.create()` se propaga como excepción del callback de `$transaction` — no reproducen físicamente un `ROLLBACK` de PostgreSQL (eso ya está demostrado, para el mecanismo genérico de `$transaction` de Prisma, fuera del alcance de un test unitario con mocks).
+
+Ningún test previo de CAT-1 a CAT-6 se relajó ni se eliminó — `simples.controller.productor.spec.ts` conserva sus 4 tests originales, solo adaptados a la nueva firma.
+
+### Validación
+
+- `npm run test:dev1`: 14/14 ✅
+- Backend build: limpio
+- `npx jest --no-cache`: **49 suites / 663 tests, todos verdes** (baseline CAT-6: 48/645 + 1 suite/18 tests de CAT-7, reconciliado exacto)
+- Frontend `tsc -b` + `vite build`: limpios (sin cambios de frontend en este bloque)
+- `organizacion-payload.test.mjs` (Node 24, fuera de CI): 13/13 ✅ (sin relación con CAT-7, verificado por reconciliación)
+- `git diff --check`: sin errores
+
+### Validación manual real (post-implementación, base local, organización real de `admin@demo.com`)
+
+Ejecutada desde la UI real (Catálogos → alta), no por script, para las cuatro entidades:
+
+- **Cereal** `VALIDACION CAT7 TEMP - Cereal`, **Ubicación** `VALIDACION CAT7 TEMP - Ubicacion` (tipo `PLANTA`, localidad `Rosario`), **Tipo de gasto** `VALIDACION CAT7 TEMP - TipoGasto`, **Productor** `VALIDACION CAT7 TEMP - Productor` con CUIT ingresado con separadores (`27-98765432-1`).
+
+Verificado en base tras cada alta:
+- Exactamente un registro funcional por entidad, en la organización correcta (verificado por ID exacto, no solo por nombre).
+- Exactamente un `AuditLog` por registro, sin duplicados: `Cereal/cereal_creado`, `Ubicacion/ubicacion_creada`, `TipoGasto/tipo_gasto_creado`, `Productor/productor_creado`.
+- Actor en los cuatro eventos: `admin@demo.com` / `Admin General`.
+- `datosAnteriores`: `null` en los cuatro (alta, no edición).
+- `datosNuevos` limitado exactamente a la allowlist documentada — `{nombre}` (Cereal), `{tipo, nombre, localidad}` (Ubicación), `{nombre, afectaLiquidacion}` (Tipo de gasto), `{cuit, nombre, localidad}` (Productor) — sin `id`/`organizacionId`/timestamps/relaciones en ninguno.
+- **CUIT de Productor**: el registro real y el `AuditLog` coinciden, ambos en `"27987654321"` — confirma que la normalización de CAT-6 (`27-98765432-1` → solo dígitos) sigue funcionando sin cambios de CAT-7.
+- Totales: `AuditLog` de la organización pasó de 45 a 49 (+4 exacto); `AuditLog` total de la base pasó de 78 a 82 (+4 exacto).
+
+**Auditoría Administrativa** (verificado visualmente por el Product Owner, no solo por API): las cuatro entidades (`Cereal`, `Ubicacion`, `TipoGasto`, `Productor`) y las cuatro acciones `_creado`/`_creada` aparecen como opciones de filtro **sin ningún cambio de código** — confirma en la práctica que `auditoriaOpciones()` (derivado de `groupBy` sobre datos reales) es realmente dinámico. La vista Antes/Después se confirmó correcta (Antes vacío, Después con los campos reales) y el actor mostrado coincide (`Admin General` / `admin@demo.com`).
+
+**`productor_editado` — limitación reconocida explícitamente:** no existe ningún control visual de edición de Productor en el frontend (`Catalogos.tsx` solo tiene alta) y no se agregó ninguno en CAT-7 (fuera de alcance: "no agregar UI ni endpoints"). Este evento queda **cubierto únicamente por los 7 tests automatizados** de `simples.controller.auditoria.spec.ts` (edición real, PATCH idempotente, CUIT editado/vaciado, 404, fallo de auditoría, aislamiento del "antes", P2002) — no por una validación manual end-to-end, porque no hay forma de disparar el `PATCH` real desde la UI sin herramientas de desarrollador, que esta validación evitó deliberadamente.
+
+**Limpieza posterior** (ejecutada tras la aprobación visual):
+- Los cuatro registros se identificaron por ID exacto (no solo por nombre) y se confirmó que ninguno tenía dependencias reales (`Viaje`/`AnticipoGasto`/`LiquidacionMovimiento` en 0 para los cuatro) antes de borrar.
+- Se eliminaron exclusivamente esos cuatro registros — ningún otro dato tocado.
+- Los cuatro `AuditLog` de esta validación se preservaron íntegramente como evidencia (confirmado explícitamente: siguen existiendo, `entidadId` apuntando a IDs ya borrados — comportamiento esperado, `AuditLog` no tiene FK hacia las entidades de negocio).
+- Conteos funcionales de vuelta al baseline exacto: Cereales 1, Ubicaciones 2, TiposGasto 0, Productores 0.
+- `AuditLog` no disminuyó: 49 (organización) / 82 (total) — igual que inmediatamente después de las cuatro altas.
+- Los tres scripts temporales de esta validación (`cat7_verificar_libre.js`, `cat7_verificar_altas.js`, `cat7_limpiar_temporales.js`) se eliminaron — ninguno llegó a un commit.
+
+### Deuda remanente
+
+- **Cereal, Ubicación y Tipo de gasto no tienen edición, baja ni estado activo/inactivo en ningún punto del sistema** — no es una omisión de CAT-7, es el estado real confirmado por la auditoría inicial. Si el producto llega a necesitar esas operaciones, requiere una decisión de producto explícita (agregar columna `activo`, endpoints y pantallas) antes de auditarlas — CAT-7 no la tomó por instrucción expresa.
+- La minimización de `AuditLog` de Organización (snapshot completo vs. diff) sigue **fuera de alcance**, deuda separada documentada en CAT-6, no tocada por CAT-7.
+- La deuda de CAT-4 (Transportista/Vehículo/filtros sin validación visual, teléfono de Chofer) sigue sin tocar, sin relación con CAT-7.
