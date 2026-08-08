@@ -14,6 +14,18 @@ import { OrganizacionPrismaClient } from "../prisma/organizacion-prisma.client";
 import { CreateFacturaDto } from "./dto/create-factura.dto";
 import { RegistrarCobranzaDto } from "./dto/registrar-cobranza.dto";
 import { AnularCobranzaDto } from "./dto/anular-cobranza.dto";
+import { registrarAuditoria } from "../common/auditoria";
+
+// AUD-1: allowlist de AuditLog para Factura — nunca el objeto Prisma completo, nunca la relación
+// "viajes"/"cobranzas" volcada entera. numero como identificador estable legible en los eventos
+// de anulación (mismo criterio que Liquidacion.numero).
+const ENTIDAD_FACTURA = "Factura";
+function snapshotFacturaCreada(f: { clienteId: string; numero: string; fecha: Date; vencimiento: Date; importe: number }) {
+  return { clienteId: f.clienteId, numero: f.numero, fecha: f.fecha, vencimiento: f.vencimiento, importe: f.importe };
+}
+function snapshotEstadoFactura(f: { numero: string; estado: string }) {
+  return { numero: f.numero, estado: f.estado };
+}
 
 const TOLERANCIA_REDONDEO = 0.01;
 
@@ -301,7 +313,8 @@ export class FacturasController {
 
   @Roles("FACTURACION", "ADMINISTRADOR")
   @Post()
-  async create(@Body() body: CreateFacturaDto) {
+  async create(@Body() body: CreateFacturaDto, @CurrentUser() actor: any) {
+    asegurarUsuarioIdentificable(actor);
     const { clienteId, numero, fecha, vencimiento, viajeIds } = body;
     if (!clienteId || !numero || !fecha || !vencimiento) {
       throw new BadRequestException("clienteId, numero, fecha y vencimiento son obligatorios");
@@ -356,22 +369,43 @@ export class FacturasController {
           data: { facturaId: factura.id, viajeId: v.id, importeViaje: v.importeTotal },
         });
       }
+      await registrarAuditoria(tx, {
+        usuarioId: actor.id,
+        entidad: ENTIDAD_FACTURA,
+        entidadId: factura.id,
+        accion: "factura_creada",
+        datosNuevos: snapshotFacturaCreada(factura),
+      });
       return tx.factura.findUnique({ where: { id: factura.id }, include: includeFactura });
     });
   }
 
   @Roles("FACTURACION", "ADMINISTRADOR")
   @Post(":id/anular")
-  async anular(@Param("id") id: string) {
+  async anular(@Param("id") id: string, @CurrentUser() actor: any) {
+    asegurarUsuarioIdentificable(actor);
     const factura = await this.prisma.factura.findUnique({ where: { id }, include: { viajes: true, cobranzas: true } });
     if (!factura) throw new NotFoundException("Factura no encontrada");
     if (factura.cobranzas.some((c) => !c.anulada)) {
       throw new BadRequestException("No se puede anular una factura con cobranzas vigentes registradas");
     }
     return this.prisma.$transaction(async (tx) => {
-      await tx.factura.update({ where: { id }, data: { estado: "ANULADO" } });
+      const actualizada = await tx.factura.update({ where: { id }, data: { estado: "ANULADO" } });
       for (const fv of factura.viajes) {
         await tx.viaje.update({ where: { id: fv.viajeId }, data: { estadoFacturacion: "PENDIENTE_DE_FACTURAR" } });
+      }
+      // AUD-1: anular una factura ya ANULADO no está bloqueado por una excepción propia (mismo
+      // comportamiento preexistente que AnticipoGasto.anular()) — comparar estado antes/después
+      // evita un evento fantasma en ese caso, sin cambiar la regla de negocio existente.
+      if (factura.estado !== actualizada.estado) {
+        await registrarAuditoria(tx, {
+          usuarioId: actor.id,
+          entidad: ENTIDAD_FACTURA,
+          entidadId: id,
+          accion: "factura_anulada",
+          datosAnteriores: snapshotEstadoFactura(factura),
+          datosNuevos: snapshotEstadoFactura(actualizada),
+        });
       }
       return tx.factura.findUnique({ where: { id }, include: includeFactura });
     });

@@ -13,9 +13,46 @@ import { OrganizacionPrismaClient } from "../prisma/organizacion-prisma.client";
 import { CreateAnticipoDto } from "./dto/create-anticipo.dto";
 import { UpdateAnticipoDto } from "./dto/update-anticipo.dto";
 import { AnularAnticipoDto } from "./dto/anular-anticipo.dto";
+import { registrarAuditoria, calcularCamposCambiados, subconjunto } from "../common/auditoria";
+import { encontrarOFallar } from "../common/encontrar-o-fallar";
 
 function fmtMoney(n: number) {
   return new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 0 }).format(n || 0);
+}
+
+// AUD-1: allowlist de AuditLog — nunca el objeto Prisma completo. Las FK (choferId/
+// transportistaId/tipoGastoId/viajeId) quedan legibles porque son la relación editable en sí,
+// mismo criterio que Chofer.transportistaId en CAT-4 — no son dato personal.
+//
+// AUD-1 (corrección post-revisión): `comprobanteUrl` es texto libre sin ninguna restricción de
+// formato/dominio en el DTO (`@IsString()`, nada más) — el cliente lo envía tal cual, sin que el
+// backend lo genere/firme. `sanitizarParaAuditoria()` no lo enmascara (no matchea
+// PATRON_CLAVE_SECRETA ni CAMPOS_A_ENMASCARAR por nombre de clave), así que guardar el valor
+// crudo persistiría en texto plano cualquier firma/token/parámetro temporal que la URL pudiera
+// llevar (ej. un link firmado de almacenamiento en la nube) — no hay evidencia de que la columna
+// esté restringida a una ruta interna no sensible, así que se minimiza: nunca se guarda la URL,
+// solo si hay un comprobante adjunto o no.
+const ENTIDAD_ANTICIPO = "AnticipoGasto";
+function snapshotAnticipo(a: {
+  choferId: string;
+  transportistaId: string;
+  tipoGastoId: string;
+  viajeId: string | null;
+  fecha: Date;
+  importe: number;
+  observaciones: string | null;
+  comprobanteUrl: string | null;
+}) {
+  return {
+    choferId: a.choferId,
+    transportistaId: a.transportistaId,
+    tipoGastoId: a.tipoGastoId,
+    viajeId: a.viajeId,
+    fecha: a.fecha,
+    importe: a.importe,
+    observaciones: a.observaciones,
+    comprobanteAdjunto: !!a.comprobanteUrl,
+  };
 }
 
 const includeAnticipo = {
@@ -204,7 +241,7 @@ export class AnticiposController {
 
   @Roles("LIQUIDACIONES", "OPERACIONES", "ADMINISTRADOR")
   @Post()
-  async create(@Body() body: CreateAnticipoDto, @CurrentUser() user: any) {
+  async create(@Body() body: CreateAnticipoDto, @CurrentUser() actor: any) {
     if (!body.choferId || !body.transportistaId || !body.tipoGastoId) {
       throw new BadRequestException("choferId, transportistaId y tipoGastoId son obligatorios");
     }
@@ -221,52 +258,115 @@ export class AnticiposController {
       throw new BadRequestException("El transportista seleccionado está dado de baja. Reactívelo antes de crear el anticipo/gasto.");
     }
 
-    return this.prisma.anticipoGasto.create({
-      data: {
-        viajeId: body.viajeId || null,
-        choferId: body.choferId,
-        transportistaId: body.transportistaId,
-        tipoGastoId: body.tipoGastoId,
-        fecha: new Date(body.fecha),
-        importe: Number(body.importe),
-        observaciones: body.observaciones || null,
-        comprobanteUrl: body.comprobanteUrl || null,
-        usuarioId: user?.id || null,
-      },
-      include: includeAnticipo,
+    return this.prisma.$transaction(async (tx) => {
+      const creado = await tx.anticipoGasto.create({
+        data: {
+          viajeId: body.viajeId || null,
+          choferId: body.choferId,
+          transportistaId: body.transportistaId,
+          tipoGastoId: body.tipoGastoId,
+          fecha: new Date(body.fecha),
+          importe: Number(body.importe),
+          observaciones: body.observaciones || null,
+          comprobanteUrl: body.comprobanteUrl || null,
+          usuarioId: actor?.id || null,
+        },
+        include: includeAnticipo,
+      });
+      await registrarAuditoria(tx, {
+        usuarioId: actor.id,
+        entidad: ENTIDAD_ANTICIPO,
+        entidadId: creado.id,
+        accion: "anticipo_creado",
+        datosNuevos: snapshotAnticipo(creado),
+      });
+      return creado;
     });
   }
 
   @Roles("LIQUIDACIONES", "OPERACIONES", "ADMINISTRADOR")
   @Patch(":id")
-  async update(@Param("id") id: string, @Body() body: UpdateAnticipoDto) {
-    const actual = await this.prisma.anticipoGasto.findUnique({ where: { id } });
-    if (!actual) throw new NotFoundException("Anticipo/gasto no encontrado");
-    if (actual.liquidado) {
-      throw new BadRequestException("No se puede modificar un anticipo/gasto ya liquidado");
-    }
-    const data: any = { ...body };
-    delete data.liquidado;
-    delete data.anulado;
-    delete data.anuladoMotivo;
-    if (data.fecha) data.fecha = new Date(data.fecha);
-    if (data.importe !== undefined) data.importe = Number(data.importe);
-    return this.prisma.anticipoGasto.update({ where: { id }, data, include: includeAnticipo });
+  update(@Param("id") id: string, @Body() body: UpdateAnticipoDto, @CurrentUser() actor: any) {
+    return this.prisma.$transaction(async (tx) => {
+      const actual = encontrarOFallar(await tx.anticipoGasto.findUnique({ where: { id } }), "Anticipo/gasto no encontrado");
+      if (actual.liquidado) {
+        throw new BadRequestException("No se puede modificar un anticipo/gasto ya liquidado");
+      }
+      const data: any = { ...body };
+      delete data.liquidado;
+      delete data.anulado;
+      delete data.anuladoMotivo;
+      if (data.fecha) data.fecha = new Date(data.fecha);
+      if (data.importe !== undefined) data.importe = Number(data.importe);
+      const actualizado = await tx.anticipoGasto.update({ where: { id }, data, include: includeAnticipo });
+
+      // AUD-1: AnticipoGasto no tiene un campo "nombre" natural para usar como identificador
+      // estable en el evento (a diferencia de Cliente/Chofer/Productor) — entidadId ya localiza
+      // el registro exacto, no se fuerza ningún campo adicional sin sentido.
+      const antes = snapshotAnticipo(actual);
+      const despues = snapshotAnticipo(actualizado);
+      const cambios = calcularCamposCambiados(antes, despues);
+      const datosAnteriores = subconjunto(antes, cambios);
+      const datosNuevos = subconjunto(despues, cambios);
+
+      // AUD-1 (corrección post-revisión): si se reemplaza un comprobante por otro (ambos
+      // presentes, referencia real distinta), el booleano `comprobanteAdjunto` no cambia — sin
+      // este marcador explícito, el reemplazo quedaría completamente invisible en el evento. Se
+      // señala el hecho del cambio, nunca el valor (ni el anterior ni el nuevo).
+      const comprobanteReemplazado =
+        !!actual.comprobanteUrl && !!actualizado.comprobanteUrl && actual.comprobanteUrl !== actualizado.comprobanteUrl;
+      if (comprobanteReemplazado && !cambios.includes("comprobanteAdjunto")) {
+        datosAnteriores.comprobanteAdjunto = true;
+        datosNuevos.comprobanteAdjunto = true;
+        (datosNuevos as Record<string, unknown>).comprobanteActualizado = true;
+      }
+
+      if (cambios.length > 0 || comprobanteReemplazado) {
+        await registrarAuditoria(tx, {
+          usuarioId: actor.id,
+          entidad: ENTIDAD_ANTICIPO,
+          entidadId: id,
+          accion: "anticipo_editado",
+          datosAnteriores,
+          datosNuevos,
+        });
+      }
+      return actualizado;
+    });
   }
 
   @Roles("LIQUIDACIONES", "OPERACIONES", "ADMINISTRADOR")
   @Post(":id/anular")
-  async anular(@Param("id") id: string, @Body() body: AnularAnticipoDto) {
-    const actual = await this.prisma.anticipoGasto.findUnique({ where: { id } });
-    if (!actual) throw new NotFoundException("Anticipo/gasto no encontrado");
-    if (actual.liquidado) {
-      throw new BadRequestException("No se puede anular un anticipo/gasto ya liquidado");
-    }
-    if (!body?.motivo) throw new BadRequestException("Debe indicar un motivo de anulación");
-    return this.prisma.anticipoGasto.update({
-      where: { id },
-      data: { anulado: true, anuladoMotivo: body.motivo },
-      include: includeAnticipo,
+  anular(@Param("id") id: string, @Body() body: AnularAnticipoDto, @CurrentUser() actor: any) {
+    return this.prisma.$transaction(async (tx) => {
+      const actual = encontrarOFallar(await tx.anticipoGasto.findUnique({ where: { id } }), "Anticipo/gasto no encontrado");
+      if (actual.liquidado) {
+        throw new BadRequestException("No se puede anular un anticipo/gasto ya liquidado");
+      }
+      if (!body?.motivo) throw new BadRequestException("Debe indicar un motivo de anulación");
+      const actualizado = await tx.anticipoGasto.update({
+        where: { id },
+        data: { anulado: true, anuladoMotivo: body.motivo },
+        include: includeAnticipo,
+      });
+
+      // AUD-1 (corrección post-revisión): anular un anticipo ya anulado no está bloqueado por
+      // una excepción propia (mismo comportamiento preexistente) — pero una segunda llamada
+      // puede cambiar el motivo real sin cambiar `anulado` (que ya era `true`). Comparar AMBOS
+      // campos evita tanto el evento fantasma (mismo motivo repetido) como la trazabilidad
+      // perdida (motivo distinto real, que sí debe quedar registrado).
+      const cambioReal = actual.anulado !== actualizado.anulado || actual.anuladoMotivo !== actualizado.anuladoMotivo;
+      if (cambioReal) {
+        await registrarAuditoria(tx, {
+          usuarioId: actor.id,
+          entidad: ENTIDAD_ANTICIPO,
+          entidadId: id,
+          accion: "anticipo_anulado",
+          datosAnteriores: { anulado: actual.anulado, anuladoMotivo: actual.anuladoMotivo, importe: actual.importe, fecha: actual.fecha },
+          datosNuevos: { anulado: actualizado.anulado, anuladoMotivo: actualizado.anuladoMotivo, importe: actualizado.importe, fecha: actualizado.fecha },
+        });
+      }
+      return actualizado;
     });
   }
 }

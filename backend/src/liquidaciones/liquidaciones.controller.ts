@@ -12,6 +12,35 @@ import { ORGANIZACION_PRISMA } from "../prisma/organizacion-prisma.token";
 import { OrganizacionPrismaClient } from "../prisma/organizacion-prisma.client";
 import { CreateLiquidacionDto } from "./dto/create-liquidacion.dto";
 import { PagarLiquidacionDto } from "./dto/pagar-liquidacion.dto";
+import { registrarAuditoria } from "../common/auditoria";
+import { encontrarOFallar } from "../common/encontrar-o-fallar";
+
+// AUD-1: allowlist de AuditLog para el alta — sin los totales (totalBruto/totalAnticipos/
+// totalDescuentos/netoPagar): recomputeTotales() corre DESPUÉS de este $transaction (ver
+// create() más abajo), así que en el momento de este evento esos campos todavía son el default
+// del schema (0), no el valor real — incluirlos auditaría un dato falso.
+const ENTIDAD_LIQUIDACION = "Liquidacion";
+function snapshotLiquidacionCreada(
+  l: { tipo: string; transportistaId: string | null; choferId: string | null; periodoDesde: Date; periodoHasta: Date; comisionPct: number },
+  cantidadViajes: number,
+  cantidadAnticipos: number,
+) {
+  return {
+    tipo: l.tipo,
+    transportistaId: l.transportistaId,
+    choferId: l.choferId,
+    periodoDesde: l.periodoDesde,
+    periodoHasta: l.periodoHasta,
+    comisionPct: l.comisionPct,
+    cantidadViajes,
+    cantidadAnticipos,
+  };
+}
+// Eventos de transición de estado: numero como identificador estable legible (mismo criterio
+// que razonSocial en Cliente), + estado antes/después. pagar() agrega fechaPago.
+function snapshotEstadoLiquidacion(l: { numero: number; estado: string }) {
+  return { numero: l.numero, estado: l.estado };
+}
 
 // LIQ-1 (AUDITORIA_LIQUIDACIONES.md): select propio para el listado — Liquidaciones.tsx (único
 // consumidor real de GET /liquidaciones, confirmado con grep) solo lee estos campos. El resto
@@ -637,6 +666,17 @@ export class LiquidacionesController {
         },
       });
 
+      // AUD-1: liquidacion_creada SIEMPRE, dentro de la misma transacción y antes que el
+      // evento condicional de abajo (que queda literalmente sin modificar — ver
+      // AUDITORIA_CATALOGOS.md, sección AUD-1, "auditoría existente que no debe romperse").
+      await registrarAuditoria(tx, {
+        usuarioId: user.id,
+        entidad: ENTIDAD_LIQUIDACION,
+        entidadId: creada.id,
+        accion: "liquidacion_creada",
+        datosNuevos: snapshotLiquidacionCreada(creada, viajes.length, anticipos.length),
+      });
+
       if (chofer && pct !== chofer.comisionPct) {
         await tx.auditLog.create({
           data: {
@@ -709,42 +749,61 @@ export class LiquidacionesController {
 
   @Roles("LIQUIDACIONES", "ADMINISTRADOR")
   @Post(":id/confirmar")
-  async confirmar(@Param("id") id: string) {
-    const liquidacion = await this.prisma.liquidacion.findUnique({ where: { id } });
-    if (!liquidacion) throw new NotFoundException("Liquidación no encontrada");
-    if (liquidacion.estado !== "BORRADOR") {
-      throw new BadRequestException("Solo se puede confirmar una liquidación en estado BORRADOR");
-    }
-    return this.prisma.liquidacion.update({
-      where: { id },
-      data: { estado: "CONFIRMADA" },
-      include: includeLiquidacion,
+  confirmar(@Param("id") id: string, @CurrentUser() actor: any) {
+    return this.prisma.$transaction(async (tx) => {
+      const actual = encontrarOFallar(await tx.liquidacion.findUnique({ where: { id } }), "Liquidación no encontrada");
+      if (actual.estado !== "BORRADOR") {
+        throw new BadRequestException("Solo se puede confirmar una liquidación en estado BORRADOR");
+      }
+      const actualizada = await tx.liquidacion.update({
+        where: { id },
+        data: { estado: "CONFIRMADA" },
+        include: includeLiquidacion,
+      });
+      await registrarAuditoria(tx, {
+        usuarioId: actor.id,
+        entidad: ENTIDAD_LIQUIDACION,
+        entidadId: id,
+        accion: "liquidacion_confirmada",
+        datosAnteriores: snapshotEstadoLiquidacion(actual),
+        datosNuevos: snapshotEstadoLiquidacion(actualizada),
+      });
+      return actualizada;
     });
   }
 
   @Roles("LIQUIDACIONES", "ADMINISTRADOR")
   @Post(":id/pagar")
-  async pagar(@Param("id") id: string, @Body() body: PagarLiquidacionDto) {
+  async pagar(@Param("id") id: string, @Body() body: PagarLiquidacionDto, @CurrentUser() actor: any) {
     const liquidacion = await this.prisma.liquidacion.findUnique({ where: { id }, include: { viajes: true } });
     if (!liquidacion) throw new NotFoundException("Liquidación no encontrada");
     if (liquidacion.estado !== "CONFIRMADA") {
       throw new BadRequestException("Solo se puede pagar una liquidación CONFIRMADA");
     }
     await this.prisma.$transaction(async (tx) => {
-      await tx.liquidacion.update({
+      const fechaPago = body?.fechaPago ? new Date(body.fechaPago) : new Date();
+      const actualizada = await tx.liquidacion.update({
         where: { id },
-        data: { estado: "PAGADA", fechaPago: body?.fechaPago ? new Date(body.fechaPago) : new Date() },
+        data: { estado: "PAGADA", fechaPago },
       });
       for (const lv of liquidacion.viajes) {
         await tx.viaje.update({ where: { id: lv.viajeId }, data: { estadoLiquidacion: "PAGADO" } });
       }
+      await registrarAuditoria(tx, {
+        usuarioId: actor.id,
+        entidad: ENTIDAD_LIQUIDACION,
+        entidadId: id,
+        accion: "liquidacion_pagada",
+        datosAnteriores: snapshotEstadoLiquidacion(liquidacion),
+        datosNuevos: { ...snapshotEstadoLiquidacion(actualizada), fechaPago: actualizada.fechaPago },
+      });
     });
     return this.findOne(id);
   }
 
   @Roles("LIQUIDACIONES", "ADMINISTRADOR")
   @Post(":id/anular")
-  async anular(@Param("id") id: string) {
+  async anular(@Param("id") id: string, @CurrentUser() actor: any) {
     const liquidacion = await this.prisma.liquidacion.findUnique({
       where: { id },
       include: { viajes: true, movimientos: true },
@@ -754,7 +813,20 @@ export class LiquidacionesController {
       throw new BadRequestException("No se puede anular una liquidación ya pagada");
     }
     await this.prisma.$transaction(async (tx) => {
-      await tx.liquidacion.update({ where: { id }, data: { estado: "ANULADA" } });
+      const actualizada = await tx.liquidacion.update({ where: { id }, data: { estado: "ANULADA" } });
+      // AUD-1 (corrección post-revisión): anular una liquidación ya ANULADA no está bloqueado
+      // por una excepción propia (solo PAGADA lo está, arriba) — comparar el estado real
+      // antes/después evita el evento fantasma en ese caso, sin tocar esa regla preexistente.
+      if (liquidacion.estado !== actualizada.estado) {
+        await registrarAuditoria(tx, {
+          usuarioId: actor.id,
+          entidad: ENTIDAD_LIQUIDACION,
+          entidadId: id,
+          accion: "liquidacion_anulada",
+          datosAnteriores: snapshotEstadoLiquidacion(liquidacion),
+          datosNuevos: snapshotEstadoLiquidacion(actualizada),
+        });
+      }
       for (const lv of liquidacion.viajes) {
         await tx.viaje.update({ where: { id: lv.viajeId }, data: { estadoLiquidacion: "PENDIENTE" } });
       }
