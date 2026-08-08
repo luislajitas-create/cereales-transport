@@ -14,6 +14,7 @@ import { CreateLiquidacionDto } from "./dto/create-liquidacion.dto";
 import { PagarLiquidacionDto } from "./dto/pagar-liquidacion.dto";
 import { registrarAuditoria } from "../common/auditoria";
 import { encontrarOFallar } from "../common/encontrar-o-fallar";
+import { finDeFechaUtc } from "../common/rango-fechas";
 
 // AUD-1: allowlist de AuditLog para el alta — sin los totales (totalBruto/totalAnticipos/
 // totalDescuentos/netoPagar): recomputeTotales() corre DESPUÉS de este $transaction (ver
@@ -276,7 +277,7 @@ export class LiquidacionesController {
     if (desde || hasta) {
       whereViaje.fecha = {};
       if (desde) whereViaje.fecha.gte = new Date(desde);
-      if (hasta) whereViaje.fecha.lte = new Date(hasta);
+      if (hasta) whereViaje.fecha.lte = finDeFechaUtc(hasta);
     }
 
     const whereAnticipo: any = { anulado: false, liquidado: false };
@@ -285,7 +286,7 @@ export class LiquidacionesController {
     if (desde || hasta) {
       whereAnticipo.fecha = {};
       if (desde) whereAnticipo.fecha.gte = new Date(desde);
-      if (hasta) whereAnticipo.fecha.lte = new Date(hasta);
+      if (hasta) whereAnticipo.fecha.lte = finDeFechaUtc(hasta);
     }
 
     const [viajes, anticipos] = await Promise.all([
@@ -452,15 +453,16 @@ export class LiquidacionesController {
 
     const planilla = construirPlanilla(liquidacion);
 
-    // Mismas 10 columnas "principales" que la pantalla (Fecha/CP/Cliente/Origen/
+    // Mismas 10 columnas "principales" que la pantalla (Fecha/CTG/Cliente/Origen/
     // Destino/Tn/Tarifa/Bruto/Descuentos/Neto), en formato vertical legible/imprimible.
     // Descuentos = comisión + adelantos combinados, para que Bruto - Descuentos = Neto
     // se lea de un vistazo sin tener que entender el desglose (ese va en la línea
-    // secundaria de abajo). Los datos secundarios (N°/CTG/Cereal/Productor/desglose
-    // por categoría) van en una línea gris compacta debajo de cada fila principal.
+    // secundaria de abajo). UX-FIN-1: CTG pasa a ser el dato principal (antes era Carta
+    // de Porte); Carta de Porte se conserva como dato secundario, junto con N°/Cereal/
+    // Productor/desglose por categoría, en una línea gris compacta debajo de cada fila.
     const columnas = [
       { titulo: "Fecha", ancho: 42 },
-      { titulo: "C. Porte", ancho: 55 },
+      { titulo: "CTG", ancho: 55 },
       { titulo: "Cliente", ancho: 66 },
       { titulo: "Origen", ancho: 55 },
       { titulo: "Destino", ancho: 55 },
@@ -506,7 +508,7 @@ export class LiquidacionesController {
     }
 
     function lineaSecundaria(f: any) {
-      const partes = [`N° ${f.numeroViaje}`, `CTG: ${f.ctg || "-"}`, `Cereal: ${f.cereal}`, `Productor: ${f.productor || "-"}`];
+      const partes = [`N° ${f.numeroViaje}`, `C. Porte: ${f.cartaPorte || "-"}`, `Cereal: ${f.cereal}`, `Productor: ${f.productor || "-"}`];
       if (f.totalAdelantos > 0) {
         const desglose = CATEGORIAS_ADELANTO.filter((cat) => f.adelantosPorCategoria[cat] > 0)
           .map((cat) => `${cat}: ${fmtMoney(f.adelantosPorCategoria[cat])}`)
@@ -529,7 +531,7 @@ export class LiquidacionesController {
       const descuentosFila = f.comisionMonto + f.totalAdelantos;
       dibujarFilaPrincipal([
         new Date(f.fecha).toLocaleDateString("es-AR"),
-        f.cartaPorte || "-",
+        f.ctg || "-",
         f.cliente,
         f.origen,
         f.destino,

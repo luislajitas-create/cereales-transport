@@ -15,6 +15,7 @@ import { CreateFacturaDto } from "./dto/create-factura.dto";
 import { RegistrarCobranzaDto } from "./dto/registrar-cobranza.dto";
 import { AnularCobranzaDto } from "./dto/anular-cobranza.dto";
 import { registrarAuditoria } from "../common/auditoria";
+import { finDeFechaUtc } from "../common/rango-fechas";
 
 // AUD-1: allowlist de AuditLog para Factura — nunca el objeto Prisma completo, nunca la relación
 // "viajes"/"cobranzas" volcada entera. numero como identificador estable legible en los eventos
@@ -91,7 +92,7 @@ export class FacturasController {
     if (desde || hasta) {
       where.fecha = {};
       if (desde) where.fecha.gte = new Date(desde);
-      if (hasta) where.fecha.lte = new Date(hasta);
+      if (hasta) where.fecha.lte = finDeFechaUtc(hasta);
     }
 
     // FAC-1: mismo patrón que GET /viajes (H-11) y GET /liquidaciones (LIQ-1) — único
@@ -127,7 +128,7 @@ export class FacturasController {
     if (desde || hasta) {
       where.fecha = {};
       if (desde) where.fecha.gte = new Date(desde);
-      if (hasta) where.fecha.lte = new Date(hasta);
+      if (hasta) where.fecha.lte = finDeFechaUtc(hasta);
     }
     const facturas = await this.prisma.factura.findMany({
       where,
@@ -181,7 +182,7 @@ export class FacturasController {
     if (desde || hasta) {
       where.fecha = {};
       if (desde) where.fecha.gte = new Date(desde);
-      if (hasta) where.fecha.lte = new Date(hasta);
+      if (hasta) where.fecha.lte = finDeFechaUtc(hasta);
     }
     const facturas = await this.prisma.factura.findMany({
       where,
@@ -253,7 +254,7 @@ export class FacturasController {
     if (desde || hasta) {
       whereViaje.fecha = {};
       if (desde) whereViaje.fecha.gte = new Date(desde);
-      if (hasta) whereViaje.fecha.lte = new Date(hasta);
+      if (hasta) whereViaje.fecha.lte = finDeFechaUtc(hasta);
     }
 
     const viajes = await this.prisma.viaje.findMany({

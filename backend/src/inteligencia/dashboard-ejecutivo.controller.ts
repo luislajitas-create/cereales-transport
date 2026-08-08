@@ -6,6 +6,7 @@ import { RentabilidadService } from "./rentabilidad.service";
 import { AgingService } from "./aging.service";
 import { AlertasService } from "./alertas.service";
 import { hoyNormalizado, primerDiaDelMes } from "./shared/fecha";
+import { finDeFechaUtc } from "../common/rango-fechas";
 
 const TOP_N = 5;
 const ORDEN_SEVERIDAD: Record<string, number> = { critica: 0, preventiva: 1, informativa: 2 };
@@ -28,7 +29,7 @@ export class DashboardEjecutivoController {
   async dashboardEjecutivo(@Query("desde") desde?: string, @Query("hasta") hasta?: string) {
     const hoy = hoyNormalizado();
     const periodoDesde = desde ? new Date(desde) : primerDiaDelMes(hoy);
-    const periodoHasta = hasta ? new Date(hasta) : hoy;
+    const periodoHasta = hasta ? finDeFechaUtc(hasta) : hoy;
 
     // Rentabilidad y el DSO de Aging usan el período seleccionado; la cartera de Aging y
     // las Alertas siempre representan el estado actual (mismo principio ya establecido en

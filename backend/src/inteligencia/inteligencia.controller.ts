@@ -3,6 +3,7 @@ import { JwtAuthGuard } from "../auth/jwt-auth.guard";
 import { RolesGuard } from "../auth/roles.guard";
 import { Roles } from "../auth/roles.decorator";
 import { RentabilidadService } from "./rentabilidad.service";
+import { finDeFechaUtc } from "../common/rango-fechas";
 
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller("inteligencia")
@@ -20,7 +21,7 @@ export class InteligenciaController {
     if (!desde || !hasta) {
       throw new BadRequestException("desde y hasta son obligatorios");
     }
-    const resultado = await this.rentabilidadService.calcular(new Date(desde), new Date(hasta), clienteId, transportistaId);
+    const resultado = await this.rentabilidadService.calcular(new Date(desde), finDeFechaUtc(hasta), clienteId, transportistaId);
     return { periodo: { desde, hasta }, ...resultado };
   }
 }

@@ -15,6 +15,7 @@ import { UpdateAnticipoDto } from "./dto/update-anticipo.dto";
 import { AnularAnticipoDto } from "./dto/anular-anticipo.dto";
 import { registrarAuditoria, calcularCamposCambiados, subconjunto } from "../common/auditoria";
 import { encontrarOFallar } from "../common/encontrar-o-fallar";
+import { finDeFechaUtc } from "../common/rango-fechas";
 
 function fmtMoney(n: number) {
   return new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 0 }).format(n || 0);
@@ -85,7 +86,7 @@ export class AnticiposController {
     if (desde || hasta) {
       where.fecha = {};
       if (desde) where.fecha.gte = new Date(desde);
-      if (hasta) where.fecha.lte = new Date(hasta);
+      if (hasta) where.fecha.lte = finDeFechaUtc(hasta);
     }
     return this.prisma.anticipoGasto.findMany({
       where,
@@ -112,7 +113,7 @@ export class AnticiposController {
     if (desde || hasta) {
       where.fecha = {};
       if (desde) where.fecha.gte = new Date(desde);
-      if (hasta) where.fecha.lte = new Date(hasta);
+      if (hasta) where.fecha.lte = finDeFechaUtc(hasta);
     }
     const anticipos = await this.prisma.anticipoGasto.findMany({
       where,
@@ -170,7 +171,7 @@ export class AnticiposController {
     if (desde || hasta) {
       where.fecha = {};
       if (desde) where.fecha.gte = new Date(desde);
-      if (hasta) where.fecha.lte = new Date(hasta);
+      if (hasta) where.fecha.lte = finDeFechaUtc(hasta);
     }
     const anticipos = await this.prisma.anticipoGasto.findMany({
       where,

@@ -13,6 +13,7 @@ import { CreateViajeDto } from "./dto/create-viaje.dto";
 import { UpdateViajeDto } from "./dto/update-viaje.dto";
 import { CambiarEstadoDto } from "./dto/cambiar-estado.dto";
 import { CancelarViajeDto } from "./dto/cancelar-viaje.dto";
+import { finDeFechaUtc } from "../common/rango-fechas";
 
 const ORDEN_ESTADOS = ["PENDIENTE", "ASIGNADO", "EN_CARGA", "CARGADO", "EN_TRANSITO", "DESCARGADO"];
 
@@ -124,7 +125,7 @@ export class ViajesController {
     if (desde || hasta) {
       where.fecha = {};
       if (desde) where.fecha.gte = new Date(desde);
-      if (hasta) where.fecha.lte = new Date(hasta);
+      if (hasta) where.fecha.lte = finDeFechaUtc(hasta);
     }
     if (clienteId) where.clienteId = clienteId;
     if (transportistaId) where.transportistaId = transportistaId;

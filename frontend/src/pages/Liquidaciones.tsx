@@ -5,6 +5,7 @@ import { useConfirm } from "../components/ConfirmDialog";
 import { useAsyncAction } from "../hooks/useAsyncAction";
 import { useAuth } from "../context/AuthContext";
 import FilaLiquidacion from "../components/FilaLiquidacion";
+import { fmtFechaCalendario } from "../utils/fecha";
 
 const CATEGORIAS_ADELANTO = ["Seguros", "Transferencia Bancaria", "Efectivo", "Combustible", "Otros"];
 // LIQ-1 (AUDITORIA_LIQUIDACIONES.md): mismos valores que LIMITES de Viajes.tsx (H-11) y
@@ -292,7 +293,7 @@ export default function Liquidaciones() {
                   <tr key={v.id}>
                     <td><input type="checkbox" checked={viajesSel.has(v.id)} onChange={() => toggle(viajesSel, setViajesSel, v.id)} /></td>
                     <td>{v.numeroViaje}</td>
-                    <td>{new Date(v.fecha).toLocaleDateString()}</td>
+                    <td>{fmtFechaCalendario(v.fecha)}</td>
                     <td>{v.ctg}</td>
                     <td>{v.cereal?.nombre}</td>
                     <td className="num">{v.toneladas}</td>
@@ -310,7 +311,7 @@ export default function Liquidaciones() {
                 {candidatos.anticipos.map((a) => (
                   <tr key={a.id}>
                     <td><input type="checkbox" checked={anticiposSel.has(a.id)} onChange={() => toggle(anticiposSel, setAnticiposSel, a.id)} /></td>
-                    <td>{new Date(a.fecha).toLocaleDateString()}</td>
+                    <td>{fmtFechaCalendario(a.fecha)}</td>
                     <td>{a.tipoGasto?.nombre}</td>
                     <td className="num">{fmtMoney(a.importe)}</td>
                     <td>{a.observaciones || "—"}</td>
@@ -383,7 +384,7 @@ export default function Liquidaciones() {
             <div className="kpi-card">
               <div className="label">Período</div>
               <div className="value">
-                {new Date(detalle.periodoDesde).toLocaleDateString()} → {new Date(detalle.periodoHasta).toLocaleDateString()}
+                {fmtFechaCalendario(detalle.periodoDesde)} → {fmtFechaCalendario(detalle.periodoHasta)}
               </div>
               <div className="sub">
                 {detalle.planilla.filas.length} viajes • {detalle.planilla.totales.toneladas.toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} toneladas
@@ -405,7 +406,7 @@ export default function Liquidaciones() {
           <table>
             <thead>
               <tr>
-                <th>Fecha</th><th>Carta de Porte</th><th>Cliente</th><th>Origen</th><th>Destino</th>
+                <th>Fecha</th><th>CTG</th><th>Cliente</th><th>Origen</th><th>Destino</th>
                 <th className="num">Tn</th><th className="num">Tarifa</th><th className="num">Bruto</th><th className="num">Descuentos</th><th className="num">Neto</th>
               </tr>
             </thead>
@@ -417,8 +418,8 @@ export default function Liquidaciones() {
                 ).join(" · ")}`;
                 return (
                   <tr key={f.liquidacionViajeId}>
-                    <td>{new Date(f.fecha).toLocaleDateString()}</td>
-                    <td>{f.cartaPorte || "—"}</td>
+                    <td>{fmtFechaCalendario(f.fecha)}</td>
+                    <td>{f.ctg || "—"}</td>
                     <td>{f.cliente}</td>
                     <td>{f.origen}</td>
                     <td>{f.destino}</td>
@@ -455,7 +456,7 @@ export default function Liquidaciones() {
                 <tbody>
                   {detalle.planilla.adelantosGenerales.map((a: any) => (
                     <tr key={a.movimientoId}>
-                      <td>{new Date(a.fecha).toLocaleDateString()}</td>
+                      <td>{fmtFechaCalendario(a.fecha)}</td>
                       <td>{a.tipoGasto}</td>
                       <td>{a.categoria}</td>
                       <td className="num">{fmtMoney(a.importe)}</td>
@@ -487,7 +488,7 @@ export default function Liquidaciones() {
                 <tbody>
                   {detalle.planilla.filas.map((f: any) => (
                     <tr key={f.liquidacionViajeId}>
-                      <td>{new Date(f.fecha).toLocaleDateString()}</td>
+                      <td>{fmtFechaCalendario(f.fecha)}</td>
                       <td>{f.numeroViaje}</td>
                       <td>{f.cartaPorte || "—"}</td>
                       <td>{f.ctg || "—"}</td>

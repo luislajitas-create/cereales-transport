@@ -6,6 +6,7 @@ import { CurrentUser } from "../auth/current-user.decorator";
 import { ORGANIZACION_PRISMA } from "../prisma/organizacion-prisma.token";
 import { OrganizacionPrismaClient } from "../prisma/organizacion-prisma.client";
 import { UpdateOrganizacionDto } from "./dto/update-organizacion.dto";
+import { rangoDiaEnZona, zonaHorariaValida, ZONA_ARGENTINA_DEFECTO } from "../common/rango-fechas";
 
 const AUDITORIA_LIMITE_DEFECTO = 20;
 const AUDITORIA_LIMITE_MAXIMO = 100;
@@ -96,9 +97,16 @@ export class OrganizacionController {
   // construir el where con los filtros solicitados, sin agregar organizacionId acá (sería un
   // filtro duplicado). Esto es lo que garantiza que un usuarioId o entidadId de otra
   // organización nunca devuelva resultados, aunque coincida con un id real de otra org.
+  //
+  // UX-FIN-1 (corrección): AuditLog.fecha es un timestamp real (@default(now())), no una fecha de
+  // negocio escrita a medianoche — el rango fechaDesde/fechaHasta debe representar el día
+  // calendario LOCAL del usuario/organización, no el día calendario UTC (ver rango-fechas.ts).
+  // Se usa la zonaHoraria de la organización si es un IANA válido; si no, el fallback documentado
+  // para este producto argentino. Nunca se depende de la TZ del proceso/Railway.
   @Roles("ADMINISTRADOR")
   @Get("auditoria")
   async auditoria(
+    @CurrentUser() actor: any,
     @Query("usuarioId") usuarioId?: string,
     @Query("entidad") entidad?: string,
     @Query("entidadId") entidadId?: string,
@@ -114,9 +122,15 @@ export class OrganizacionController {
     if (entidadId) where.entidadId = entidadId;
     if (accion) where.accion = accion;
     if (fechaDesde || fechaHasta) {
+      const organizacion = await this.prisma.organizacion.findUnique({
+        where: { id: actor.organizacionId },
+        select: { zonaHoraria: true },
+      });
+      const zona = zonaHorariaValida(organizacion?.zonaHoraria) ?? ZONA_ARGENTINA_DEFECTO;
+
       where.fecha = {};
-      if (fechaDesde) where.fecha.gte = new Date(fechaDesde);
-      if (fechaHasta) where.fecha.lte = new Date(fechaHasta);
+      if (fechaDesde) where.fecha.gte = rangoDiaEnZona(fechaDesde, zona).desde;
+      if (fechaHasta) where.fecha.lte = rangoDiaEnZona(fechaHasta, zona).hasta;
     }
 
     const page = Math.max(1, parseInt(pageRaw ?? "", 10) || 1);
