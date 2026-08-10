@@ -35,6 +35,9 @@ a { color: var(--accent); text-decoration: none; }
 .login-card button:hover { background: var(--accent); }
 .login-error { color: var(--danger); font-size: 0.85rem; margin-bottom: 1rem; }
 .login-hint { font-size: 0.75rem; color: #666; margin-top: 1rem; }
+/* GAP-GE-1: variante más ancha para formularios con varios campos (alta de organización) sin
+   tocar el ancho fijo de 360px que ya usan Login/RecuperarContrasena/AceptarInvitacion. */
+.login-card.wide { width: 520px; max-width: 92vw; }
 
 .app-shell { display: flex; min-height: 100vh; }
 .sidebar { width: 230px; background: var(--primary); color: white; padding: 1.2rem 0; display: flex; flex-direction: column; }
@@ -158,4 +161,13 @@ tbody tr:hover { background: #f0f4f7; }
 .section-title { font-size: 1.05rem; color: var(--primary); margin: 1.2rem 0 0.6rem; }
 .checkbox-row { display: flex; align-items: center; gap: 0.5rem; }
 .actions-row { display: flex; gap: 0.6rem; margin-top: 1rem; }
+
+/* GAP-GE-1: caja para mostrar el Código del Grupo Económico (id real del grupo, relabeleado en
+   la UI) — solo visible para ADMINISTRADOR, nunca en localStorage ni en logs. */
+.codigo-grupo {
+  display: flex; align-items: center; gap: 0.6rem; background: var(--bg);
+  border: 1px solid var(--border); border-radius: 4px; padding: 0.6rem 0.8rem;
+  font-family: Consolas, monospace; font-size: 0.85rem; word-break: break-all;
+}
+.codigo-grupo code { flex: 1; }
 .totals-table td { font-weight: 600; }

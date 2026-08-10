@@ -1,8 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "../api/client";
 import { useAuth } from "../context/AuthContext";
 import { useAsyncAction } from "../hooks/useAsyncAction";
 import { useConfirm } from "../components/ConfirmDialog";
+import { esFormatoCodigoGrupoValido, normalizarCodigoGrupo, validarNombreGrupo } from "./grupo-economico-payload";
 
 interface Grupo {
   id: string;
@@ -48,6 +49,31 @@ export default function GrupoEconomico() {
   const resolverAccion = useAsyncAction();
   const otorgarAccion = useAsyncAction();
   const filaAccion = useAsyncAction();
+
+  // GAP-GE-1 — crear un grupo nuevo o unirse a uno existente (única vía hasta ahora era API
+  // directa: el backend ya soportaba esto desde el Bloque 10.1, sin ningún control en esta
+  // pantalla). Dos acciones independientes porque solo una de las dos puede tener sentido en un
+  // momento dado (la organización actual no pertenece a ningún grupo todavía).
+  const [nombreGrupo, setNombreGrupo] = useState("");
+  const [errorNombreGrupo, setErrorNombreGrupo] = useState("");
+  const crearGrupoAccion = useAsyncAction();
+
+  const [codigoUnirse, setCodigoUnirse] = useState("");
+  const [errorCodigoUnirse, setErrorCodigoUnirse] = useState("");
+  const unirseAccion = useAsyncAction();
+
+  // "Código del Grupo Económico" en la UI es el id real del grupo (el backend no tiene otro
+  // identificador) — nunca se lo llama "id"/"UUID" ni se persiste en localStorage/sessionStorage,
+  // ni se registra en consola. Es una credencial operativa permanente (no una invitación
+  // temporal ni revocable con el diseño actual) — mismo criterio de manejo que un password.
+  const [copiado, setCopiado] = useState(false);
+  const [errorCopiado, setErrorCopiado] = useState("");
+  const copiadoTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    return () => {
+      if (copiadoTimeout.current) clearTimeout(copiadoTimeout.current);
+    };
+  }, []);
 
   function cargarGrupo() {
     setCargandoGrupo(true);
@@ -109,6 +135,71 @@ export default function GrupoEconomico() {
     // duplicada por cada usuarioId todavía pendiente en ese momento.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [accesos, grupo]);
+
+  async function handleCrearGrupo(e: React.FormEvent) {
+    e.preventDefault();
+    const errorValidacion = validarNombreGrupo(nombreGrupo);
+    if (errorValidacion) {
+      setErrorNombreGrupo(errorValidacion);
+      return;
+    }
+    setErrorNombreGrupo("");
+    const { confirmed } = await confirm({
+      title: "Crear Grupo Económico",
+      message: `Se va a crear el grupo "${nombreGrupo.trim()}" y tu organización va a quedar como su primera integrante.`,
+      severity: "medium",
+    });
+    if (!confirmed) return;
+    crearGrupoAccion.run(
+      async () => {
+        const { data } = await api.post("/grupo-economico", { nombre: nombreGrupo.trim() });
+        setGrupo(data);
+        setNombreGrupo("");
+      },
+      { successMessage: "Grupo económico creado." },
+    );
+  }
+
+  async function handleUnirseGrupo(e: React.FormEvent) {
+    e.preventDefault();
+    const codigo = normalizarCodigoGrupo(codigoUnirse);
+    if (!esFormatoCodigoGrupoValido(codigo)) {
+      setErrorCodigoUnirse("El código no tiene el formato esperado. Verificá que lo copiaste completo.");
+      return;
+    }
+    setErrorCodigoUnirse("");
+    const { confirmed } = await confirm({
+      title: "Unirse a un Grupo Económico",
+      message: "Tu organización actual se va a incorporar a este grupo económico. Pedile el código al administrador de la otra organización antes de confirmar.",
+      severity: "medium",
+    });
+    if (!confirmed) return;
+    unirseAccion.run(
+      async () => {
+        const { data } = await api.post(`/grupo-economico/${encodeURIComponent(codigo)}/organizaciones`);
+        setGrupo(data);
+        setCodigoUnirse("");
+      },
+      { successMessage: "Tu organización se unió al grupo económico." },
+    );
+  }
+
+  function copiarCodigo() {
+    if (!grupo) return;
+    navigator.clipboard
+      .writeText(grupo.id)
+      .then(() => {
+        setErrorCopiado("");
+        setCopiado(true);
+        if (copiadoTimeout.current) clearTimeout(copiadoTimeout.current);
+        copiadoTimeout.current = setTimeout(() => setCopiado(false), 2000);
+      })
+      .catch(() => {
+        // Nunca se loguea el código acá — el mensaje es genérico a propósito.
+        setCopiado(false);
+        setErrorCopiado("No se pudo copiar automáticamente. Seleccioná y copiá el código manualmente.");
+      });
+  }
 
   function handleBuscar(e: React.FormEvent) {
     e.preventDefault();
@@ -191,10 +282,88 @@ export default function GrupoEconomico() {
   }
 
   if (!grupo) {
+    // La ruta ya está restringida a ADMINISTRADOR (ProtectedRoute, App.tsx) — este chequeo es
+    // una segunda barrera explícita antes de mostrar cualquier control de escritura, igual
+    // criterio que el resto de esta pantalla (ver comentario de más arriba, cargarGrupo()).
+    if (usuario?.rol !== "ADMINISTRADOR") {
+      return (
+        <div>
+          <div className="page-header"><h1>Grupo Económico</h1></div>
+          <p className="muted">Tu organización todavía no pertenece a ningún grupo económico.</p>
+        </div>
+      );
+    }
+
     return (
       <div>
         <div className="page-header"><h1>Grupo Económico</h1></div>
-        <p className="muted">Tu organización no pertenece a ningún grupo económico.</p>
+        <p className="muted">Tu organización todavía no pertenece a ningún grupo económico.</p>
+
+        <div className="card">
+          <div className="section-title">Crear Grupo Económico</div>
+          <p className="muted">
+            Un Grupo Económico agrupa varias organizaciones (una por cada CUIT) para compartir identidad de
+            choferes, otorgar acceso cruzado y consolidar pagos. Tu organización actual queda como su primera
+            integrante.
+          </p>
+          <form onSubmit={handleCrearGrupo}>
+            {errorNombreGrupo && <div className="error-banner">{errorNombreGrupo}</div>}
+            {crearGrupoAccion.error && <div className="error-banner">{crearGrupoAccion.error}</div>}
+            {crearGrupoAccion.success && <div className="success-banner">{crearGrupoAccion.success}</div>}
+            <div className="form-grid">
+              <div className="field">
+                <label>Nombre del grupo</label>
+                <input
+                  value={nombreGrupo}
+                  onChange={(e) => {
+                    setNombreGrupo(e.target.value);
+                    if (errorNombreGrupo) setErrorNombreGrupo("");
+                  }}
+                  disabled={crearGrupoAccion.busy}
+                  required
+                />
+              </div>
+            </div>
+            <div className="actions-row">
+              <button className="btn" type="submit" disabled={crearGrupoAccion.busy}>
+                {crearGrupoAccion.busy ? "Creando..." : "Crear grupo"}
+              </button>
+            </div>
+          </form>
+        </div>
+
+        <div className="card">
+          <div className="section-title">Unirse a un Grupo Económico existente</div>
+          <p className="muted">
+            Pedile el Código del Grupo Económico al administrador de la organización que ya creó el grupo e
+            ingresalo acá para incorporar tu organización actual.
+          </p>
+          <form onSubmit={handleUnirseGrupo}>
+            {errorCodigoUnirse && <div className="error-banner">{errorCodigoUnirse}</div>}
+            {unirseAccion.error && <div className="error-banner">{unirseAccion.error}</div>}
+            {unirseAccion.success && <div className="success-banner">{unirseAccion.success}</div>}
+            <div className="form-grid">
+              <div className="field">
+                <label>Código del Grupo Económico</label>
+                <input
+                  value={codigoUnirse}
+                  onChange={(e) => {
+                    setCodigoUnirse(e.target.value);
+                    if (errorCodigoUnirse) setErrorCodigoUnirse("");
+                  }}
+                  disabled={unirseAccion.busy}
+                  placeholder="Pegá acá el código que te compartieron"
+                  required
+                />
+              </div>
+            </div>
+            <div className="actions-row">
+              <button className="btn" type="submit" disabled={unirseAccion.busy}>
+                {unirseAccion.busy ? "Uniendo..." : "Unir mi organización"}
+              </button>
+            </div>
+          </form>
+        </div>
       </div>
     );
   }
@@ -205,6 +374,25 @@ export default function GrupoEconomico() {
         <h1>Grupo Económico</h1>
       </div>
       <p className="muted">Grupo: {grupo.nombre}</p>
+
+      {usuario?.rol === "ADMINISTRADOR" && (
+        <div className="card">
+          <div className="section-title">Código del Grupo Económico</div>
+          <p className="muted">
+            Es una credencial operativa permanente, no una invitación temporal: cualquiera que la tenga puede
+            incorporar una organización a este grupo, y hoy no existe forma de revocarla o hacerla expirar.
+            Compartila únicamente con el administrador de la organización que querés incorporar, por un canal
+            privado que controlás — nunca la publiques.
+          </p>
+          {errorCopiado && <div className="error-banner">{errorCopiado}</div>}
+          <div className="codigo-grupo">
+            <code>{grupo.id}</code>
+            <button className="btn secondary" type="button" onClick={copiarCodigo}>
+              {copiado ? "Código copiado" : "Copiar código"}
+            </button>
+          </div>
+        </div>
+      )}
 
       <form className="card" onSubmit={handleBuscar}>
         <div className="section-title">Otorgar acceso</div>

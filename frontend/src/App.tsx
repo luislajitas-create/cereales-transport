@@ -24,6 +24,7 @@ import Organizacion from "./pages/Organizacion";
 import RecuperarContrasena from "./pages/RecuperarContrasena";
 import RestablecerContrasena from "./pages/RestablecerContrasena";
 import AceptarInvitacion from "./pages/AceptarInvitacion";
+import AltaOrganizacion from "./pages/AltaOrganizacion";
 import Usuarios from "./pages/Usuarios";
 import AuditoriaAdministrativa from "./pages/AuditoriaAdministrativa";
 import GrupoEconomico from "./pages/GrupoEconomico";
@@ -39,6 +40,7 @@ export default function App() {
         <Route path="/recuperar-contrasena" element={<RecuperarContrasena />} />
         <Route path="/restablecer-contrasena" element={<RestablecerContrasena />} />
         <Route path="/aceptar-invitacion" element={<AceptarInvitacion />} />
+        <Route path="/alta-organizacion" element={<AltaOrganizacion />} />
         <Route element={<Layout />}>
           <Route path="/" element={<Dashboard />} />
           <Route path="/viajes" element={<Viajes />} />

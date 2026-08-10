@@ -41,6 +41,7 @@ export default function Login() {
           {loading ? "Ingresando..." : "Ingresar"}
         </button>
         <p className="login-hint"><Link to="/recuperar-contrasena">¿Olvidaste tu contraseña?</Link></p>
+        <p className="login-hint"><Link to="/alta-organizacion">Registrar una nueva organización</Link></p>
       </form>
     </div>
   );
