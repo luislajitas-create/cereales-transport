@@ -19,7 +19,13 @@ a { color: var(--accent); text-decoration: none; }
   display: flex;
   align-items: center;
   justify-content: center;
-  height: 100vh;
+  /* GAP-GE-1-UX: un `height` fijo, combinado con contenido más alto que el viewport (formularios
+     largos como el de alta de organización), deja parte de la tarjeta — incluido el resumen de
+     error del principio del formulario — arriba del borde superior visible en pantallas bajas.
+     `min-height` deja crecer la página con el contenido sin alterar el centrado en las pantallas
+     de login/recuperar/restablecer, donde el contenido ya entra sobrado en 100vh. */
+  min-height: 100vh;
+  padding: 2rem 1rem;
   background: linear-gradient(135deg, var(--primary), var(--accent));
 }
 .login-card {

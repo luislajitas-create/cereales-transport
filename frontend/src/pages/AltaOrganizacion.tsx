@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api/client";
 import { useAsyncAction } from "../hooks/useAsyncAction";
@@ -25,17 +25,40 @@ export default function AltaOrganizacion() {
   const [form, setForm] = useState<AltaOrganizacionForm>(FORM_VACIO);
   const [errorConfirmacion, setErrorConfirmacion] = useState("");
   const [exito, setExito] = useState<{ nombreOrganizacion: string } | null>(null);
-  const { busy, error, run } = useAsyncAction();
+  const { busy, error, setError, run } = useAsyncAction();
+
+  // GAP-GE-1-UX — incidente real: el formulario es más alto que la pantalla y el botón queda
+  // lejos del banner de error (que se renderizaba arriba de todo). Alguien parado junto al botón
+  // no veía ninguna confirmación de que el submit había fallado — ver AUDITORIA_GAP_GE_1.md. El
+  // resumen de error es ahora una región viva (role="alert" + aria-live="assertive") que además
+  // se autoenfoca y se desplaza a la vista apenas aparece, sin depender de que el usuario note un
+  // cambio visual fuera de su campo de visión actual.
+  const mensajeError = errorConfirmacion || error;
+  const resumenErrorRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (mensajeError && resumenErrorRef.current) {
+      resumenErrorRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
+      resumenErrorRef.current.focus();
+    }
+  }, [mensajeError]);
 
   function actualizar(campo: keyof AltaOrganizacionForm, valor: string) {
     setForm((prev) => ({ ...prev, [campo]: valor }));
-    if (errorConfirmacion) setErrorConfirmacion("");
+    // El error de confirmación de contraseña solo se resuelve tocando una de las dos
+    // contraseñas — cambiar otro campo (nombre, CUIT, etc.) no lo invalida.
+    if ((campo === "password" || campo === "confirmarPassword") && errorConfirmacion) {
+      setErrorConfirmacion("");
+    }
   }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     const errorPassword = validarConfirmacionPassword(form.password, form.confirmarPassword);
     if (errorPassword) {
+      // Un error de backend previo (de un intento anterior) queda obsoleto frente a este nuevo
+      // problema de cliente — nunca mostrar los dos mensajes a la vez.
+      if (error) setError("");
       setErrorConfirmacion(errorPassword);
       return;
     }
@@ -74,8 +97,17 @@ export default function AltaOrganizacion() {
           segundo — después vas a poder unirlo a un Grupo Económico desde la pantalla de administración.
         </p>
         <form onSubmit={handleSubmit}>
-          {error && <div className="login-error">{error}</div>}
-          {errorConfirmacion && <div className="login-error">{errorConfirmacion}</div>}
+          {mensajeError && (
+            <div
+              className="login-error"
+              role="alert"
+              aria-live="assertive"
+              tabIndex={-1}
+              ref={resumenErrorRef}
+            >
+              {mensajeError}
+            </div>
+          )}
 
           <div className="form-grid">
             <div className="field">
